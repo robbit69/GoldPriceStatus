@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>金价监控</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0; /* 灰白色背景 */
+      color: #d4af37; /* 金色文字 */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      flex-direction: column;
+      transition: background-color 0.3s;
+    }
+    .container {
+      text-align: center;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      flex-direction: column;
+    }
+    .price {
+      font-size: 5vw; /* 默认字体 */
+      font-weight: bold;
+    }
+    .time {
+      font-size: 2vw; /* 时间文字大小 */
+      margin-top: 1em;
+    }
+    /* 全屏时的 body 背景色 */
+    .fullscreen {
+      background-color: #000; /* 全屏时黑色背景 */
+    }
+    /* 全屏时的价格字体更大 */
+    .fullscreen .price {
+      font-size: 10vw;
+    }
+    @media (max-width: 600px) {
+      .price { font-size: 8vw; }
+      .time { font-size: 4vw; }
+      .fullscreen .price {
+        font-size: 15vw;
+      }
+    }
+    /* 全屏按钮样式，居中显示 */
+    #fullscreenButton {
+      position: fixed;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="price">加载中...</div>
+    <div class="time"></div>
+    <!-- 全屏按钮 -->
+    <div style="margin-top: 4em;"><button id="fullscreenButton">全屏</button></div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html> 

@@ -1,0 +1,24 @@
+# Node.js 依赖
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Wrangler 生成的文件
+.wrangler/
+dist/
+worker/
+
+# 环境变量
+.env
+.dev.vars
+
+# 编辑器和操作系统文件
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 日志文件
+*.log 
