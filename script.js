@@ -99,4 +99,4 @@ function updateDisplay(price, timestamp) {
 setInterval(async () => {
   const { price, timestamp } = await fetchGoldPrice();
   updateDisplay(price, timestamp);
-}, 5000); 
+}, 60000); 
