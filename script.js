@@ -53,8 +53,8 @@ async function fetchGoldPrice() {
     // 使用当前时间作为结束时间
     let end = now;
     
-    // 构建目标URL，请求CNY（人民币）单位的金价数据，单位为克
-    let targetUrl = `https://goldprice.yanrrd.com/price?currency=cny&unit=grams`;
+    // 构建目标URL，请求CNY（人民币）单位的金价数据，单位为克ß
+    let targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams`;
     
     const response = await fetch(targetUrl, {
       headers: {
