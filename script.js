@@ -97,7 +97,7 @@ async function fetchGoldPrice() {
     return { price: '无数据', timestamp: null };
   } catch (error) {
     console.error('Fetch error:', error);
-    return { price: '获取数据失败', timestamp: null };
+    return { price: '获取数据失败了捏', timestamp: null };
   }
 }
 
