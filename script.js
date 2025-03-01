@@ -54,7 +54,7 @@ async function fetchGoldPrice() {
     let end = now;
     
     // 构建目标URL，请求CNY（人民币）单位的金价数据，单位为克
-    let targetUrl = `https://fsapi.gold.org/api/goldprice/v11/chart/price/cny/grams/${start},${end}`;
+    let targetUrl = `https://goldprice.yanrrd.com/price?currency=cny&unit=grams`;
     
     const response = await fetch(targetUrl, {
       headers: {
@@ -64,31 +64,6 @@ async function fetchGoldPrice() {
     
     const responseData = await response.json();
     
-    // 检查是否有数据
-    if (responseData.chartData && responseData.chartData.CNY && responseData.chartData.CNY.length === 0 && responseData.chartData.asOfDate) {
-      // 如果没有价格数据但有asOfDate，说明可能是黄金停盘
-      // 重新调整时间再次请求
-      const asOfDate = new Date(responseData.chartData.asOfDate);
-      now = asOfDate.getTime();
-      start = now - 30000000;
-      end = now;
-      
-      // 重新构建URL并发送请求
-      targetUrl = `https://fsapi.gold.org/api/goldprice/v11/chart/price/cny/grams/${start},${end}`;
-      const newResponse = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Compatible; Browser)'
-        }
-      });
-      
-      const newResponseData = await newResponse.json();
-      
-      if (newResponseData.chartData && newResponseData.chartData.CNY && newResponseData.chartData.CNY.length > 0) {
-        const latest = newResponseData.chartData.CNY[newResponseData.chartData.CNY.length - 1];
-        return { price: latest[1], timestamp: latest[0] };
-      }
-    }
-    
     if (responseData.chartData && responseData.chartData.CNY && responseData.chartData.CNY.length > 0) {
       const latest = responseData.chartData.CNY[responseData.chartData.CNY.length - 1];
       return { price: latest[1], timestamp: latest[0] };
@@ -97,7 +72,7 @@ async function fetchGoldPrice() {
     return { price: '无数据', timestamp: null };
   } catch (error) {
     console.error('Fetch error:', error);
-    return { price: '获取数据失败了捏', timestamp: null };
+    return { price: '获取数据失败', timestamp: null };
   }
 }
 
