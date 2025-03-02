@@ -84,7 +84,14 @@ function updateDisplay(price, timestamp) {
     priceElement.textContent = price;
   }
   if (timestamp) {
-    timeElement.textContent = new Date(timestamp).toLocaleString('zh-CN');
+    // 检测用户浏览器的时区
+    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // 根据用户时区格式化时间
+    timeElement.textContent = '更新时间：' + new Date(timestamp).toLocaleString(undefined, {
+      timeZone: userTimeZone,
+      month: '2-digit',
+      day: '2-digit',
+    });
   } else {
     timeElement.textContent = '—';
   }
