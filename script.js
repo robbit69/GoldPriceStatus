@@ -88,9 +88,7 @@ function updateDisplay(price, timestamp) {
     const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     // 根据用户时区格式化时间
     timeElement.textContent = '更新时间：' + new Date(timestamp).toLocaleString(undefined, {
-      timeZone: userTimeZone,
-      month: '2-digit',
-      day: '2-digit',
+      timeZone: userTimeZone
     });
   } else {
     timeElement.textContent = '—';
