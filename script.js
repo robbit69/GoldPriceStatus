@@ -56,11 +56,29 @@ async function fetchGoldPrice() {
     // 构建目标URL，请求CNY（人民币）单位的金价数据，单位为克ß
     let targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams`;
     
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Compatible; Browser)'
+    let response;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Compatible; Browser)'
+        }
+      });
+
+      if (response.status === 200) {
+        break;
       }
-    });
+
+      retryCount++;
+      if (retryCount === maxRetries) {
+        throw new Error(`请求失败,状态码: ${response.status}`);
+      }
+      
+      // 等待1秒后重试
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
     
     const responseData = await response.json();
     
@@ -72,6 +90,7 @@ async function fetchGoldPrice() {
     return { price: '无数据', timestamp: null };
   } catch (error) {
     console.error('Fetch error:', error);
+    console.error('获取数据失败');
     return { price: '获取数据失败', timestamp: null };
   }
 }
