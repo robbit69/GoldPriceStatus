@@ -122,5 +122,12 @@ function updateDisplay(price, timestamp) {
 
 setInterval(async () => {
   const { price, timestamp } = await fetchGoldPrice();
-  updateDisplay(price, timestamp);
-}, 60000); 
+  if (!isNaN(price)) {
+    updateDisplay(price, timestamp);
+  } else {
+    console.log(JSON.stringify({
+      price: price,
+      timestamp: timestamp
+    }, null, 2));
+  }
+}, 60000);
