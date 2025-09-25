@@ -3,6 +3,16 @@ const priceElement = document.querySelector('.price');
 const timeElement = document.querySelector('.time');
 const fullscreenButton = document.getElementById('fullscreenButton');
 
+// =============== 设置自适应高度，避免移动端滚动抖动 ===============
+function setAppHeight() {
+  // 使用视口高度作为 CSS 变量，保证全屏和非全屏下内容垂直居中
+  document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+}
+
+setAppHeight();
+window.addEventListener('resize', setAppHeight);
+window.addEventListener('orientationchange', setAppHeight);
+
 // 检测是否为 iOS 设备
 const isIOS = /iP(ad|od|hone)/i.test(navigator.userAgent);
 
@@ -13,12 +23,14 @@ fullscreenButton.addEventListener('click', (event) => {
     // iOS 采用伪全屏：直接添加 CSS 类
     document.body.classList.add('fullscreen');
     fullscreenButton.style.display = 'none';
+    setAppHeight();
   } else {
     // 非 iOS 使用 Fullscreen API
     document.documentElement.requestFullscreen()
       .then(() => {
         document.body.classList.add('fullscreen');
         fullscreenButton.style.display = 'none';
+        setAppHeight();
       })
       .catch(err => console.error('进入全屏失败：', err));
   }
@@ -30,6 +42,7 @@ document.addEventListener('click', () => {
     if (document.body.classList.contains('fullscreen')) {
       document.body.classList.remove('fullscreen');
       fullscreenButton.style.display = 'block';
+      setAppHeight();
     }
   } else {
     if (document.fullscreenElement) {
@@ -37,11 +50,24 @@ document.addEventListener('click', () => {
         .then(() => {
           document.body.classList.remove('fullscreen');
           fullscreenButton.style.display = 'block';
+          setAppHeight();
         })
         .catch(err => console.error('退出全屏失败：', err));
     }
   }
 });
+
+// =============== 监听系统触发的全屏变化，保持按钮状态一致 ===============
+function handleFullscreenChange() {
+  // 浏览器或系统退出全屏时恢复按钮并重置高度
+  if (!document.fullscreenElement) {
+    document.body.classList.remove('fullscreen');
+    fullscreenButton.style.display = 'block';
+    setAppHeight();
+  }
+}
+
+document.addEventListener('fullscreenchange', handleFullscreenChange);
 
 // =============== 获取金价数据 ===============
 async function fetchGoldPrice() {
