@@ -1,133 +1,159 @@
-// =============== 页面变量 ===============
+// =============== 页面常量和 DOM 引用 ===============
+const REFRESH_INTERVAL = 60000; // 自动刷新间隔（毫秒）
 const priceElement = document.querySelector('.price');
 const timeElement = document.querySelector('.time');
 const fullscreenButton = document.getElementById('fullscreenButton');
 
-// 检测是否为 iOS 设备
-const isIOS = /iP(ad|od|hone)/i.test(navigator.userAgent);
+/* 功能：检测当前设备是否为 iOS */
+function detectIOS() {
+  return /iP(ad|od|hone)/i.test(navigator.userAgent);
+}
 
-// =============== 全屏按钮事件：进入全屏 / 伪全屏 ===============
-fullscreenButton.addEventListener('click', (event) => {
-  event.stopPropagation(); // 阻止事件冒泡，避免触发退出全屏
+const isIOS = detectIOS();
+
+/* 功能：应用全屏或伪全屏时的样式 */
+function applyFullscreenStyles() {
+  document.body.classList.add('fullscreen');
+  fullscreenButton.style.display = 'none';
+}
+
+/* 功能：退出全屏后恢复默认样式 */
+function removeFullscreenStyles() {
+  document.body.classList.remove('fullscreen');
+  fullscreenButton.style.display = 'block';
+}
+
+/* 功能：请求进入全屏或伪全屏 */
+async function enterFullscreen() {
   if (isIOS) {
-    // iOS 采用伪全屏：直接添加 CSS 类
-    document.body.classList.add('fullscreen');
-    fullscreenButton.style.display = 'none';
-  } else {
-    // 非 iOS 使用 Fullscreen API
-    document.documentElement.requestFullscreen()
-      .then(() => {
-        document.body.classList.add('fullscreen');
-        fullscreenButton.style.display = 'none';
-      })
-      .catch(err => console.error('进入全屏失败：', err));
+    applyFullscreenStyles();
+    return;
   }
-});
 
-// =============== 页面点击事件：退出全屏 / 退出伪全屏 ===============
-document.addEventListener('click', () => {
+  try {
+    await document.documentElement.requestFullscreen();
+    applyFullscreenStyles();
+  } catch (error) {
+    console.error('进入全屏失败：', error);
+  }
+}
+
+/* 功能：退出全屏或伪全屏 */
+async function exitFullscreen() {
   if (isIOS) {
     if (document.body.classList.contains('fullscreen')) {
-      document.body.classList.remove('fullscreen');
-      fullscreenButton.style.display = 'block';
+      removeFullscreenStyles();
     }
-  } else {
-    if (document.fullscreenElement) {
-      document.exitFullscreen()
-        .then(() => {
-          document.body.classList.remove('fullscreen');
-          fullscreenButton.style.display = 'block';
-        })
-        .catch(err => console.error('退出全屏失败：', err));
-    }
+    return;
   }
-});
 
-// =============== 获取金价数据 ===============
+  if (!document.fullscreenElement) {
+    return;
+  }
+
+  try {
+    await document.exitFullscreen();
+  } catch (error) {
+    console.error('退出全屏失败：', error);
+  } finally {
+    removeFullscreenStyles();
+  }
+}
+
+/* 功能：绑定全屏相关的事件 */
+function bindFullscreenEvents() {
+  fullscreenButton.addEventListener('click', event => {
+    event.stopPropagation();
+    enterFullscreen();
+  });
+
+  document.addEventListener('click', () => {
+    exitFullscreen();
+  });
+}
+
+/* 功能：将时间戳格式化为用户所在时区的时间 */
+function formatTimestamp(timestamp) {
+  if (!timestamp) {
+    return '—';
+  }
+
+  const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return new Date(timestamp).toLocaleString(undefined, { timeZone: userTimeZone });
+}
+
+/* 功能：获取最新的黄金价格 */
 async function fetchGoldPrice() {
   try {
-    // 获取当前时间戳（毫秒）
-    let now = Date.now();
-    // 计算5分钟（300000毫秒）前的时间戳作为开始时间
-    let start = now - 300000;
-    // 使用当前时间作为结束时间
-    let end = now;
-    
-    // 构建目标URL，请求CNY（人民币）单位的金价数据，单位为克ß
-    let targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams`;
-    
-    let response;
-    let retryCount = 0;
+    const targetUrl = 'https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams';
     const maxRetries = 3;
 
-    while (retryCount < maxRetries) {
-      response = await fetch(targetUrl, {
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      const response = await fetch(targetUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Compatible; Browser)'
         }
       });
 
       if (response.status === 200) {
-        break;
+        const responseData = await response.json();
+        const currencyData = responseData.chartData?.CNY ?? [];
+
+        if (currencyData.length > 0) {
+          const latest = currencyData[currencyData.length - 1];
+          return { price: latest[1], timestamp: latest[0] };
+        }
+
+        return { price: '无数据', timestamp: null };
       }
 
-      retryCount++;
-      if (retryCount === maxRetries) {
+      if (attempt === maxRetries) {
         throw new Error(`请求失败,状态码: ${response.status}`);
       }
-      
-      // 等待1秒后重试
+
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
-    const responseData = await response.json();
-    
-    if (responseData.chartData && responseData.chartData.CNY && responseData.chartData.CNY.length > 0) {
-      const latest = responseData.chartData.CNY[responseData.chartData.CNY.length - 1];
-      return { price: latest[1], timestamp: latest[0] };
-    }
-    
-    return { price: '无数据', timestamp: null };
   } catch (error) {
     console.error('Fetch error:', error);
-    console.error('获取数据失败');
     return { price: '获取数据失败', timestamp: null };
   }
+
+  return { price: '无数据', timestamp: null };
 }
 
-// =============== 更新界面显示 ===============
+/* 功能：更新价格和时间显示 */
 function updateDisplay(price, timestamp) {
   if (typeof price === 'number') {
-    priceElement.textContent = price.toFixed(2) + ' CNY/克';
+    priceElement.textContent = `${price.toFixed(2)} CNY/克`;
   } else {
     priceElement.textContent = price;
   }
-  if (timestamp) {
-    // 检测用户浏览器的时区
-    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    // 根据用户时区格式化时间
-    timeElement.textContent = '更新时间：' + new Date(timestamp).toLocaleString(undefined, {
-      timeZone: userTimeZone
-    });
-  } else {
-    timeElement.textContent = '—';
-  }
+
+  timeElement.textContent = `更新时间：${formatTimestamp(timestamp)}`;
 }
 
-// =============== 初始化 + 定时刷新 ===============
-(async () => {
+/* 功能：从网络获取数据并更新页面 */
+async function refreshPrice() {
   const { price, timestamp } = await fetchGoldPrice();
   updateDisplay(price, timestamp);
-})();
+}
 
-setInterval(async () => {
-  const { price, timestamp } = await fetchGoldPrice();
-  if (!isNaN(price)) {
-    updateDisplay(price, timestamp);
-  } else {
-    console.log(JSON.stringify({
-      price: price,
-      timestamp: timestamp
-    }, null, 2));
-  }
-}, 60000);
+/* 功能：设置定时自动刷新 */
+function startAutoRefresh() {
+  setInterval(() => {
+    refreshPrice();
+  }, REFRESH_INTERVAL);
+}
+
+/* 功能：初始化整个页面逻辑 */
+function init() {
+  bindFullscreenEvents();
+  refreshPrice();
+  startAutoRefresh();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
