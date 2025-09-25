@@ -11,7 +11,9 @@
     }
     html,
     body {
-      height: 100%;
+      height: var(--app-height);
+      overflow: hidden; /* 禁止任何滚动行为 */
+      overscroll-behavior: none; /* 防止触顶/触底回弹 */
     }
     body {
       margin: 0;
@@ -22,9 +24,10 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: var(--app-height);
+      height: var(--app-height);
       transition: background-color 0.3s;
-      overflow: hidden; /* 禁止页面滚动，保持布局稳定 */
+      position: relative;
+      touch-action: manipulation; /* 禁止滚动手势但保留点击 */
     }
     .container {
       text-align: center;
@@ -34,6 +37,7 @@
       flex-direction: column;
       gap: 1.5em;
       width: min(90vw, 520px);
+      height: 100%;
     }
     .price {
       font-size: 5vw; /* 默认字体 */
@@ -58,16 +62,29 @@
         font-size: 15vw;
       }
     }
-    /* 全屏按钮样式，居中显示 */
+    /* 全屏按钮样式，居中显示，轻拟物风格 */
     #fullscreenButton {
       position: fixed;
       bottom: 8vh;
       left: 50%;
       transform: translateX(-50%);
-      padding: 10px 20px;
+      padding: 12px 28px;
       font-size: 16px;
       cursor: pointer;
       z-index: 1000;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      background: linear-gradient(145deg, #fdfdfd, #d7d7d7);
+      box-shadow: 6px 6px 12px rgba(0, 0, 0, 0.15),
+                  -6px -6px 12px rgba(255, 255, 255, 0.6);
+      color: #505050;
+      font-weight: 600;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    #fullscreenButton:active {
+      transform: translateX(-50%) translateY(2px);
+      box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.2),
+                  inset -4px -4px 8px rgba(255, 255, 255, 0.7);
     }
   </style>
 </head>
