@@ -35,7 +35,7 @@
       justify-content: center;
       align-items: center;
       flex-direction: column;
-      gap: 1.5em;
+      gap: 1.2em;
       width: min(90vw, 520px);
       height: 100%;
     }
@@ -46,6 +46,47 @@
     .time {
       font-size: 2vw; /* 时间文字大小 */
       margin-top: 1em;
+    }
+    .status {
+      font-size: 2.4vw;
+      font-weight: 600;
+      display: flex;
+      gap: 0.4em;
+      align-items: center;
+    }
+    .status.stopped {
+      color: #c0392b;
+    }
+    .status.active {
+      color: #27ae60;
+    }
+    .change-board {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.8em;
+      margin-top: 0.6em;
+    }
+    .change-card {
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 12px;
+      padding: 0.8em 1em;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3em;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+    .change-card .period {
+      font-size: 1.9vw;
+      color: rgba(0, 0, 0, 0.55);
+    }
+    .change-card .change-value {
+      font-size: 2.4vw;
+      font-weight: 700;
+    }
+    .change-card .change-extra {
+      font-size: 1.6vw;
+      color: rgba(0, 0, 0, 0.55);
     }
     /* 全屏时的 body 背景色 */
     .fullscreen {
@@ -58,6 +99,10 @@
     @media (max-width: 600px) {
       .price { font-size: 8vw; }
       .time { font-size: 4vw; }
+      .status { font-size: 5vw; }
+      .change-card .period { font-size: 4.2vw; }
+      .change-card .change-value { font-size: 5vw; }
+      .change-card .change-extra { font-size: 3.4vw; }
       .fullscreen .price {
         font-size: 15vw;
       }
@@ -92,6 +137,24 @@
   <div class="container">
     <div class="price">加载中...</div>
     <div class="time"></div>
+    <div class="status" aria-live="polite">状态加载中...</div>
+    <div class="change-board" aria-live="polite">
+      <div class="change-card">
+        <div class="period">今日</div>
+        <div class="change-value" data-period="day">—</div>
+        <div class="change-extra" data-extra="day">—</div>
+      </div>
+      <div class="change-card">
+        <div class="period">过去 7 天</div>
+        <div class="change-value" data-period="week">—</div>
+        <div class="change-extra" data-extra="week">—</div>
+      </div>
+      <div class="change-card">
+        <div class="period">过去 30 天</div>
+        <div class="change-value" data-period="month">—</div>
+        <div class="change-extra" data-extra="month">—</div>
+      </div>
+    </div>
   </div>
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
