@@ -1,6 +1,9 @@
 // =============== 页面变量 ===============
 const priceElement = document.querySelector('.price');
 const timeElement = document.querySelector('.time');
+const statusElement = document.querySelector('.status');
+const changeValueElements = document.querySelectorAll('.change-value');
+const changeExtraElements = document.querySelectorAll('.change-extra');
 const fullscreenButton = document.getElementById('fullscreenButton');
 
 // 功能：管理布局高度并彻底关闭滚动
@@ -100,10 +103,13 @@ const fullscreenController = (() => {
   };
 })();
 
-// 功能：请求金价数据
+// 功能：请求金价数据并包含历史数据
 async function fetchGoldPrice() {
   try {
-    const targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams`;
+    const now = Date.now();
+    const monthRange = 30 * 24 * 60 * 60 * 1000;
+    const starttime = now - monthRange;
+    const targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams&starttime=${starttime}&endtime=${now}`;
     let response;
     let retryCount = 0;
     const maxRetries = 3;
@@ -129,21 +135,24 @@ async function fetchGoldPrice() {
 
     const responseData = await response.json();
 
-    if (responseData.chartData && responseData.chartData.CNY && responseData.chartData.CNY.length > 0) {
-      const latest = responseData.chartData.CNY[responseData.chartData.CNY.length - 1];
-      return { price: latest[1], timestamp: latest[0] };
+    const currencyKey = (responseData.currency || 'CNY').toUpperCase();
+    const dataPoints = responseData.chartData && responseData.chartData[currencyKey] ? responseData.chartData[currencyKey] : [];
+
+    if (dataPoints.length > 0) {
+      const latest = dataPoints[dataPoints.length - 1];
+      return { price: latest[1], timestamp: latest[0], dataPoints };
     }
 
-    return { price: '无数据', timestamp: null };
+    return { price: '无数据', timestamp: null, dataPoints: [] };
   } catch (error) {
     console.error('Fetch error:', error);
     console.error('获取数据失败');
-    return { price: '获取数据失败', timestamp: null };
+    return { price: '获取数据失败', timestamp: null, dataPoints: [] };
   }
 }
 
 // 功能：刷新页面显示
-function updateDisplay(price, timestamp) {
+function updateDisplay(price, timestamp, dataPoints) {
   if (typeof price === 'number') {
     priceElement.textContent = price.toFixed(2) + ' CNY/克';
   } else {
@@ -157,22 +166,134 @@ function updateDisplay(price, timestamp) {
   } else {
     timeElement.textContent = '—';
   }
+
+  marketStatusRenderer.render(timestamp);
+  changeBoardRenderer.render(dataPoints);
 }
+
+// 功能：负责渲染市场状态提示
+const marketStatusRenderer = (() => {
+  const CLOSED_THRESHOLD = 2 * 60 * 60 * 1000;
+
+  // 功能：根据时间戳判断是否停盘
+  function determineStatus(latestTimestamp) {
+    if (!latestTimestamp) {
+      return { text: '⛔ 数据不可用', className: 'stopped' };
+    }
+
+    const now = Date.now();
+    const diff = now - latestTimestamp;
+
+    if (diff > CLOSED_THRESHOLD) {
+      return { text: '⛔ 已停盘', className: 'stopped' };
+    }
+
+    return { text: '🟢 交易中', className: 'active' };
+  }
+
+  // 功能：渲染市场状态
+  function render(latestTimestamp) {
+    const status = determineStatus(latestTimestamp);
+    statusElement.textContent = status.text;
+    statusElement.classList.remove('stopped', 'active');
+    statusElement.classList.add(status.className);
+  }
+
+  return { render };
+})();
+
+// 功能：负责计算与渲染涨跌幅看板
+const changeBoardRenderer = (() => {
+  const PERIOD_CONFIG = {
+    day: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    month: 30 * 24 * 60 * 60 * 1000
+  };
+
+  // 功能：计算指定周期的涨跌幅
+  function calculateChange(dataPoints, duration) {
+    if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+      return null;
+    }
+
+    const now = Date.now();
+    const startTime = now - duration;
+
+    let baselinePrice = null;
+    let baselineTimestamp = null;
+
+    for (let i = dataPoints.length - 1; i >= 0; i -= 1) {
+      const [timestamp, price] = dataPoints[i];
+      if (timestamp <= startTime) {
+        baselinePrice = price;
+        baselineTimestamp = timestamp;
+        break;
+      }
+      baselinePrice = price;
+      baselineTimestamp = timestamp;
+    }
+
+    const latestPoint = dataPoints[dataPoints.length - 1];
+    const latestPrice = latestPoint ? latestPoint[1] : null;
+
+    if (baselinePrice == null || latestPrice == null) {
+      return null;
+    }
+
+    const changeValue = latestPrice - baselinePrice;
+    const changePercent = baselinePrice === 0 ? 0 : (changeValue / baselinePrice) * 100;
+
+    return {
+      changeValue,
+      changePercent,
+      baselinePrice,
+      baselineTimestamp
+    };
+  }
+
+  // 功能：将涨跌幅格式化为文本
+  function formatChange(changeData) {
+    if (!changeData) {
+      return { valueText: '—', extraText: '暂无数据' };
+    }
+
+    const { changeValue, changePercent, baselinePrice } = changeData;
+    const sign = changeValue >= 0 ? '+' : '';
+    const valueText = `${sign}${changeValue.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`;
+    const extraText = `起始价：${baselinePrice.toFixed(2)}`;
+
+    return { valueText, extraText };
+  }
+
+  // 功能：渲染涨跌信息
+  function render(dataPoints) {
+    changeValueElements.forEach((element) => {
+      const period = element.getAttribute('data-period');
+      const duration = PERIOD_CONFIG[period];
+      const changeData = calculateChange(dataPoints, duration);
+      const { valueText } = formatChange(changeData);
+      element.textContent = valueText;
+    });
+
+    changeExtraElements.forEach((element) => {
+      const period = element.getAttribute('data-extra');
+      const duration = PERIOD_CONFIG[period];
+      const changeData = calculateChange(dataPoints, duration);
+      const { extraText } = formatChange(changeData);
+      element.textContent = extraText;
+    });
+  }
+
+  return { render };
+})();
 
 // 功能：初始化页面并定时刷新
 (async () => {
-  const { price, timestamp } = await fetchGoldPrice();
-  updateDisplay(price, timestamp);
+  const { price, timestamp, dataPoints } = await fetchGoldPrice();
+  updateDisplay(price, timestamp, dataPoints);
 })();
 
 setInterval(async () => {
-  const { price, timestamp } = await fetchGoldPrice();
-  if (!isNaN(price)) {
-    updateDisplay(price, timestamp);
-  } else {
-    console.log(JSON.stringify({
-      price: price,
-      timestamp: timestamp
-    }, null, 2));
-  }
+  const { price, timestamp, dataPoints } = await fetchGoldPrice();
+  updateDisplay(price, timestamp, dataPoints);
 }, 60000);
