@@ -480,6 +480,7 @@ const marketStatusRenderer = (() => {
     const normalizedStatus = remoteStatus && typeof remoteStatus === 'object' ? remoteStatus : marketStatusService.createUnknownStatus();
     const now = Date.now();
     const isDataStale = !latestTimestamp || now - latestTimestamp > STALE_THRESHOLD;
+
     const scheduleClosed = isScheduledClosed(new Date(now));
 
     if (scheduleClosed && normalizedStatus.state !== 'closed') {
@@ -513,7 +514,6 @@ const marketStatusRenderer = (() => {
     if (scheduleClosed) {
       return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
     }
-
     if (isDataStale) {
       return { text: '⏸ 数据延迟', className: 'delayed', tooltip: normalizedStatus.detail };
     }
