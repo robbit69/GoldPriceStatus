@@ -107,7 +107,7 @@ const fullscreenController = (() => {
 async function fetchGoldPrice() {
   try {
     const now = Date.now();
-    const monthRange = 30 * 24 * 60 * 60 * 1000;
+    const monthRange = 24 * 60 * 60 * 1000;
     const starttime = now - monthRange;
     const targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams&starttime=${starttime}&endtime=${now}`;
     let response;
