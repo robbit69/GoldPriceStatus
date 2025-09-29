@@ -103,6 +103,148 @@ const fullscreenController = (() => {
   };
 })();
 
+// 功能：渲染背景折线图，提升视觉同时保持可读性
+const backgroundChartRenderer = (() => {
+  const canvas = document.getElementById('backgroundChart');
+
+  if (!canvas || !canvas.getContext) {
+    return {
+      render: () => {},
+      refresh: () => {}
+    };
+  }
+
+  const context = canvas.getContext('2d');
+  let cachedPoints = [];
+
+  // 功能：根据数据绘制折线
+  function drawChart() {
+    const rect = canvas.getBoundingClientRect();
+    const devicePixelRatio = window.devicePixelRatio || 1;
+
+    const displayWidth = Math.max(1, Math.floor(rect.width * devicePixelRatio));
+    const displayHeight = Math.max(1, Math.floor(rect.height * devicePixelRatio));
+
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!cachedPoints || cachedPoints.length < 2) {
+      return;
+    }
+
+    const priceValues = cachedPoints
+      .map(([, price]) => Number(price))
+      .filter((value) => Number.isFinite(value));
+
+    if (priceValues.length < 2) {
+      return;
+    }
+
+    const minPrice = Math.min(...priceValues);
+    const maxPrice = Math.max(...priceValues);
+    const priceRange = Math.max(maxPrice - minPrice, 0.0001);
+
+    const horizontalMargin = 120 * devicePixelRatio;
+    const verticalMargin = 100 * devicePixelRatio;
+    const chartWidth = Math.max(20 * devicePixelRatio, canvas.width - horizontalMargin * 2);
+    const chartHeight = Math.max(20 * devicePixelRatio, canvas.height - verticalMargin * 2);
+
+    const plottedPoints = priceValues.map((price, index) => {
+      const progress = index / (priceValues.length - 1);
+      const x = horizontalMargin + progress * chartWidth;
+      const y = canvas.height - verticalMargin - ((price - minPrice) / priceRange) * chartHeight;
+      return { x, y };
+    });
+
+    const firstPoint = plottedPoints[0];
+    const lastPoint = plottedPoints[plottedPoints.length - 1];
+
+    context.save();
+    context.beginPath();
+    plottedPoints.forEach(({ x, y }, index) => {
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.lineTo(lastPoint.x, canvas.height - verticalMargin);
+    context.lineTo(firstPoint.x, canvas.height - verticalMargin);
+    context.closePath();
+
+    const gradient = context.createLinearGradient(0, verticalMargin, 0, canvas.height - verticalMargin);
+    gradient.addColorStop(0, 'rgba(255, 210, 128, 0.24)');
+    gradient.addColorStop(1, 'rgba(255, 210, 128, 0.03)');
+    context.fillStyle = gradient;
+    context.fill();
+    context.restore();
+
+    context.save();
+    context.beginPath();
+    plottedPoints.forEach(({ x, y }, index) => {
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.strokeStyle = 'rgba(255, 214, 120, 0.85)';
+    context.lineWidth = 2.4 * devicePixelRatio;
+    context.shadowColor = 'rgba(255, 190, 92, 0.45)';
+    context.shadowBlur = 18 * devicePixelRatio;
+    context.stroke();
+    context.restore();
+
+    context.save();
+    const glowRadius = 42 * devicePixelRatio;
+    const glowGradient = context.createRadialGradient(
+      lastPoint.x,
+      lastPoint.y,
+      0,
+      lastPoint.x,
+      lastPoint.y,
+      glowRadius
+    );
+    glowGradient.addColorStop(0, 'rgba(255, 214, 120, 0.55)');
+    glowGradient.addColorStop(1, 'rgba(255, 214, 120, 0.02)');
+    context.fillStyle = glowGradient;
+    const glowX = Math.max(0, lastPoint.x - glowRadius);
+    const glowY = Math.max(0, lastPoint.y - glowRadius);
+    const glowWidth = Math.min(glowRadius * 2, canvas.width - glowX);
+    const glowHeight = Math.min(glowRadius * 2, canvas.height - glowY);
+    context.fillRect(glowX, glowY, glowWidth, glowHeight);
+    context.restore();
+  }
+
+  // 功能：保存数据并触发绘制
+  function render(dataPoints) {
+    cachedPoints = Array.isArray(dataPoints)
+      ? dataPoints
+          .slice(-240)
+          .filter((point) => Array.isArray(point) && point.length >= 2)
+          .sort((a, b) => a[0] - b[0])
+      : [];
+    drawChart();
+  }
+
+  // 功能：在视口尺寸发生变化时刷新画布
+  function refresh() {
+    drawChart();
+  }
+
+  window.addEventListener('resize', refresh);
+  window.addEventListener('orientationchange', refresh);
+
+  return {
+    render,
+    refresh
+  };
+})();
+
 // 功能：请求金价数据并包含历史数据
 async function fetchGoldPrice() {
   try {
@@ -169,23 +311,82 @@ function updateDisplay(price, timestamp, dataPoints) {
 
   marketStatusRenderer.render(timestamp);
   changeBoardRenderer.render(dataPoints);
+  backgroundChartRenderer.render(dataPoints);
 }
 
 // 功能：负责渲染市场状态提示
 const marketStatusRenderer = (() => {
-  const CLOSED_THRESHOLD = 2 * 60 * 60 * 1000;
+  const STALE_THRESHOLD = 45 * 60 * 1000;
+  const TRADING_TIMEZONE = 'America/New_York';
+  const DAILY_BREAK_START = 17 * 60;
+  const DAILY_BREAK_END = 18 * 60;
+  const SUNDAY_OPEN_MINUTES = 18 * 60;
+  const FRIDAY_CLOSE_MINUTES = 17 * 60;
 
-  // 功能：根据时间戳判断是否停盘
+  // 功能：获取纽约时间的星期与分钟数
+  function getNewYorkTimeParts(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: TRADING_TIMEZONE,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(date);
+    const mapped = {};
+
+    parts.forEach((part) => {
+      if (part.type !== 'literal') {
+        mapped[part.type] = part.value;
+      }
+    });
+
+    return {
+      weekday: mapped.weekday,
+      hour: Number.parseInt(mapped.hour, 10),
+      minute: Number.parseInt(mapped.minute, 10)
+    };
+  }
+
+  // 功能：基于纽约时间判断是否处于休市时段
+  function isScheduledClosed(date = new Date()) {
+    const { weekday, hour, minute } = getNewYorkTimeParts(date);
+    const minutes = hour * 60 + minute;
+
+    if (weekday === 'Sat') {
+      return true;
+    }
+
+    if (weekday === 'Sun' && minutes < SUNDAY_OPEN_MINUTES) {
+      return true;
+    }
+
+    if (weekday === 'Fri' && minutes >= FRIDAY_CLOSE_MINUTES) {
+      return true;
+    }
+
+    if (minutes >= DAILY_BREAK_START && minutes < DAILY_BREAK_END) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // 功能：根据时间戳判断市场状态
   function determineStatus(latestTimestamp) {
     if (!latestTimestamp) {
       return { text: '⛔ 数据不可用', className: 'stopped' };
     }
 
     const now = Date.now();
-    const diff = now - latestTimestamp;
 
-    if (diff > CLOSED_THRESHOLD) {
-      return { text: '⛔ 已停盘', className: 'stopped' };
+    if (isScheduledClosed(new Date(now))) {
+      return { text: '⛔ 市场休市', className: 'stopped' };
+    }
+
+    if (now - latestTimestamp > STALE_THRESHOLD) {
+      return { text: '⏸ 数据延迟', className: 'delayed' };
     }
 
     return { text: '🟢 交易中', className: 'active' };
@@ -195,7 +396,7 @@ const marketStatusRenderer = (() => {
   function render(latestTimestamp) {
     const status = determineStatus(latestTimestamp);
     statusElement.textContent = status.text;
-    statusElement.classList.remove('stopped', 'active');
+    statusElement.classList.remove('stopped', 'active', 'delayed');
     statusElement.classList.add(status.className);
   }
 
