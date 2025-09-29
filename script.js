@@ -245,6 +245,97 @@ const backgroundChartRenderer = (() => {
   };
 })();
 
+// 功能：通过 Alpha Vantage API 获取市场开闭状态
+const marketStatusService = (() => {
+  const API_ENDPOINT = 'https://www.alphavantage.co/query?function=MARKET_STATUS&apikey=';
+  const REQUEST_TIMEOUT = 6500;
+  const CACHE_DURATION = 5 * 60 * 1000;
+
+  let cachedStatus = null;
+
+  // 功能：构造用于展示的默认状态对象
+  function createUnknownStatus(reason = '第三方市场状态不可用') {
+    return {
+      state: 'unknown',
+      detail: reason,
+      fetchedAt: Date.now(),
+      source: 'local'
+    };
+  }
+
+  // 功能：判断缓存是否仍然有效
+  function isCacheValid() {
+    if (!cachedStatus) {
+      return false;
+    }
+    if (cachedStatus.state === 'unknown') {
+      return false;
+    }
+    return Date.now() - cachedStatus.fetchedAt < CACHE_DURATION;
+  }
+
+  // 功能：调用第三方接口并解析外汇市场的开闭状态
+  async function fetchStatusFromAPI() {
+    const apiKey = (window.GOLD_APP && window.GOLD_APP.alphaVantageKey) || 'demo';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+    try {
+      const response = await fetch(`${API_ENDPOINT}${apiKey}`, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (GoldPriceStatus Dashboard)'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Alpha Vantage 请求失败：${response.status}`);
+      }
+
+      const payload = await response.json();
+      const markets = Array.isArray(payload.markets) ? payload.markets : [];
+      const forexMarket = markets.find((market) => market.market_type === 'Forex');
+
+      if (!forexMarket || typeof forexMarket.current_status !== 'string') {
+        throw new Error('未能从 Alpha Vantage 解析外汇市场状态');
+      }
+
+      const normalizedState = forexMarket.current_status.toLowerCase();
+
+      return {
+        state: normalizedState === 'open' ? 'open' : 'closed',
+        detail: `Alpha Vantage Forex 市场状态：${forexMarket.current_status}`,
+        fetchedAt: Date.now(),
+        source: 'Alpha Vantage'
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  // 功能：公开获取市场状态的方法，含缓存与兜底
+  async function getStatus() {
+    if (isCacheValid()) {
+      return cachedStatus;
+    }
+
+    try {
+      const status = await fetchStatusFromAPI();
+      cachedStatus = status;
+      return status;
+    } catch (error) {
+      console.error('获取第三方市场状态失败：', error);
+      const fallbackStatus = createUnknownStatus(error instanceof Error ? error.message : String(error));
+      return fallbackStatus;
+    }
+  }
+
+  return {
+    getStatus,
+    createUnknownStatus
+  };
+})();
+
 // 功能：请求金价数据并包含历史数据
 async function fetchGoldPrice() {
   try {
@@ -294,7 +385,7 @@ async function fetchGoldPrice() {
 }
 
 // 功能：刷新页面显示
-function updateDisplay(price, timestamp, dataPoints) {
+function updateDisplay(price, timestamp, dataPoints, remoteStatus = marketStatusService.createUnknownStatus()) {
   if (typeof price === 'number') {
     priceElement.textContent = price.toFixed(2) + ' CNY/克';
   } else {
@@ -309,7 +400,7 @@ function updateDisplay(price, timestamp, dataPoints) {
     timeElement.textContent = '—';
   }
 
-  marketStatusRenderer.render(timestamp);
+  marketStatusRenderer.render(timestamp, remoteStatus);
   changeBoardRenderer.render(dataPoints);
   backgroundChartRenderer.render(dataPoints);
 }
@@ -373,31 +464,54 @@ const marketStatusRenderer = (() => {
     return false;
   }
 
-  // 功能：根据时间戳判断市场状态
-  function determineStatus(latestTimestamp) {
-    if (!latestTimestamp) {
-      return { text: '⛔ 数据不可用', className: 'stopped' };
+  // 功能：根据时间戳与第三方状态综合判断市场状态
+  function determineStatus(latestTimestamp, remoteStatus) {
+    const normalizedStatus = remoteStatus && typeof remoteStatus === 'object' ? remoteStatus : marketStatusService.createUnknownStatus();
+    const now = Date.now();
+    const isDataStale = !latestTimestamp || now - latestTimestamp > STALE_THRESHOLD;
+
+    if (normalizedStatus.state === 'closed') {
+      return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
     }
 
-    const now = Date.now();
+    if (normalizedStatus.state === 'open') {
+      if (!latestTimestamp) {
+        return { text: '🟠 市场交易中（无有效报价）', className: 'delayed', tooltip: normalizedStatus.detail };
+      }
+
+      if (isDataStale) {
+        return { text: '🟠 市场交易中（行情源延迟）', className: 'delayed', tooltip: normalizedStatus.detail };
+      }
+
+      return { text: '🟢 交易中', className: 'active', tooltip: normalizedStatus.detail };
+    }
+
+    if (!latestTimestamp) {
+      return { text: '⛔ 数据不可用', className: 'stopped', tooltip: normalizedStatus.detail };
+    }
 
     if (isScheduledClosed(new Date(now))) {
-      return { text: '⛔ 市场休市', className: 'stopped' };
+      return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
     }
 
-    if (now - latestTimestamp > STALE_THRESHOLD) {
-      return { text: '⏸ 数据延迟', className: 'delayed' };
+    if (isDataStale) {
+      return { text: '⏸ 数据延迟', className: 'delayed', tooltip: normalizedStatus.detail };
     }
 
-    return { text: '🟢 交易中', className: 'active' };
+    return { text: '🟢 交易中', className: 'active', tooltip: normalizedStatus.detail };
   }
 
   // 功能：渲染市场状态
-  function render(latestTimestamp) {
-    const status = determineStatus(latestTimestamp);
+  function render(latestTimestamp, remoteStatus) {
+    const status = determineStatus(latestTimestamp, remoteStatus);
     statusElement.textContent = status.text;
     statusElement.classList.remove('stopped', 'active', 'delayed');
     statusElement.classList.add(status.className);
+    if (status.tooltip) {
+      statusElement.setAttribute('title', status.tooltip);
+    } else {
+      statusElement.removeAttribute('title');
+    }
   }
 
   return { render };
@@ -488,13 +602,31 @@ const changeBoardRenderer = (() => {
   return { render };
 })();
 
+// 功能：统一刷新所有数据并处理错误
+async function refreshDashboard() {
+  try {
+    const [priceResult, statusResult] = await Promise.allSettled([
+      fetchGoldPrice(),
+      marketStatusService.getStatus()
+    ]);
+
+    const pricePayload = priceResult.status === 'fulfilled'
+      ? priceResult.value
+      : { price: '获取数据失败', timestamp: null, dataPoints: [] };
+
+    const remoteStatus = statusResult.status === 'fulfilled'
+      ? statusResult.value
+      : marketStatusService.createUnknownStatus(statusResult.reason instanceof Error ? statusResult.reason.message : '第三方状态请求失败');
+
+    updateDisplay(pricePayload.price, pricePayload.timestamp, pricePayload.dataPoints, remoteStatus);
+  } catch (error) {
+    console.error('刷新页面时出现错误：', error);
+  }
+}
+
 // 功能：初始化页面并定时刷新
 (async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
+  await refreshDashboard();
 })();
 
-setInterval(async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
-}, 60000);
+setInterval(refreshDashboard, 60000);
