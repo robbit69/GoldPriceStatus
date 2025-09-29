@@ -18,9 +18,9 @@
     body {
       margin: 0;
       padding: 0;
-      font-family: Arial, sans-serif;
-      background-color: #f0f0f0; /* 灰白色背景 */
-      color: #d4af37; /* 金色文字 */
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: radial-gradient(circle at 20% 20%, #1a1d29 0%, #08090f 80%);
+      color: #f5d06f; /* 默认金色文字 */
       display: flex;
       justify-content: center;
       align-items: center;
@@ -29,82 +29,161 @@
       position: relative;
       touch-action: manipulation; /* 禁止滚动手势但保留点击 */
     }
-    .container {
-      text-align: center;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      gap: 1.2em;
-      width: min(90vw, 520px);
+    #backgroundChart {
+      position: absolute;
+      inset: 0;
+      width: 100%;
       height: 100%;
+      z-index: 0;
+      opacity: 0.3;
+      pointer-events: none;
+      filter: saturate(120%);
+    }
+    body::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(160deg, rgba(8, 9, 15, 0.8) 0%, rgba(8, 9, 15, 0.3) 60%, rgba(8, 9, 15, 0.8) 100%);
+      z-index: 1;
+      pointer-events: none;
+    }
+    .fullscreen::after {
+      background: linear-gradient(160deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 60%, rgba(0, 0, 0, 0.85) 100%);
+    }
+    .container {
+      position: relative;
+      z-index: 2;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 1.6em;
+      width: min(92vw, 960px);
+      padding: 2.8em clamp(1.6em, 4vw, 3.6em);
+      border-radius: 24px;
+      background: rgba(12, 15, 24, 0.7);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(20px);
+    }
+    .info-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8em;
     }
     .price {
-      font-size: 5vw; /* 默认字体 */
-      font-weight: bold;
+      font-size: clamp(2.2rem, 5vw, 4.6rem);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-shadow: 0 0 18px rgba(255, 230, 124, 0.35);
     }
     .time {
-      font-size: 2vw; /* 时间文字大小 */
-      margin-top: 1em;
+      font-size: clamp(0.95rem, 2.2vw, 1.6rem);
+      color: rgba(245, 208, 111, 0.86);
     }
     .status {
-      font-size: 2.4vw;
+      font-size: clamp(1.1rem, 2.6vw, 1.8rem);
       font-weight: 600;
-      display: flex;
-      gap: 0.4em;
+      display: inline-flex;
+      gap: 0.6em;
       align-items: center;
+      padding: 0.55em 0.9em;
+      border-radius: 999px;
+      background: rgba(17, 24, 40, 0.6);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+      width: fit-content;
+    }
+    .status .status-indicator {
+      width: 0.85em;
+      height: 0.85em;
+      border-radius: 50%;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
     }
     .status.stopped {
-      color: #c0392b;
+      color: #ffb9a3;
     }
     .status.active {
-      color: #27ae60;
+      color: #a5ffcd;
+    }
+    .status.delayed {
+      color: #ffe79e;
     }
     .change-board {
       width: 100%;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 0.8em;
-      margin-top: 0.6em;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1.2em;
     }
     .change-card {
-      background: rgba(255, 255, 255, 0.16);
-      border-radius: 12px;
-      padding: 0.8em 1em;
+      background: linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+      border-radius: 18px;
+      padding: 1.2em 1.4em;
       display: flex;
       flex-direction: column;
-      gap: 0.3em;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      gap: 0.35em;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
     }
     .change-card .period {
-      font-size: 1.9vw;
-      color: rgba(0, 0, 0, 0.55);
+      font-size: clamp(0.95rem, 2vw, 1.35rem);
+      color: rgba(255, 255, 255, 0.65);
+      letter-spacing: 0.08em;
     }
     .change-card .change-value {
-      font-size: 2.4vw;
+      font-size: clamp(1.2rem, 2.6vw, 2rem);
       font-weight: 700;
+      color: #fdf5c7;
     }
     .change-card .change-extra {
-      font-size: 1.6vw;
-      color: rgba(0, 0, 0, 0.55);
+      font-size: clamp(0.85rem, 1.8vw, 1.2rem);
+      color: rgba(255, 255, 255, 0.6);
     }
-    /* 全屏时的 body 背景色 */
+    /* 全屏时的 body 背景色与强化对比 */
     .fullscreen {
-      background-color: #000; /* 全屏时黑色背景 */
+      background: radial-gradient(circle at 20% 20%, #05070c 0%, #000000 80%);
+      color: #fff7d1;
     }
-    /* 全屏时的价格字体更大 */
+    .fullscreen .container {
+      background: rgba(5, 7, 12, 0.78);
+      box-shadow: 0 18px 80px rgba(0, 0, 0, 0.7);
+    }
     .fullscreen .price {
-      font-size: 10vw;
+      font-size: clamp(2.8rem, 10vw, 9rem);
+      text-shadow: 0 0 24px rgba(255, 255, 255, 0.6);
+    }
+    .fullscreen .status {
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
     }
     @media (max-width: 600px) {
-      .price { font-size: 8vw; }
-      .time { font-size: 4vw; }
-      .status { font-size: 5vw; }
-      .change-card .period { font-size: 4.2vw; }
-      .change-card .change-value { font-size: 5vw; }
-      .change-card .change-extra { font-size: 3.4vw; }
-      .fullscreen .price {
-        font-size: 15vw;
+      .container {
+        padding: 2.4em 1.6em;
+        text-align: center;
+      }
+      .info-panel {
+        align-items: center;
+      }
+      .status {
+        align-self: center;
+      }
+      .change-board {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+    }
+    @media (min-width: 900px) and (orientation: landscape) {
+      .container {
+        flex-direction: row;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: clamp(2.4em, 5vw, 5em);
+      }
+      .info-panel {
+        flex: 1;
+        justify-content: center;
+        max-width: 420px;
+      }
+      .change-board {
+        flex: 1;
+        align-content: center;
+        align-items: center;
+        justify-items: stretch;
       }
     }
     /* 全屏按钮样式，居中显示，轻拟物风格 */
@@ -116,13 +195,13 @@
       padding: 12px 28px;
       font-size: 16px;
       cursor: pointer;
-      z-index: 1000;
+      z-index: 3;
       border-radius: 999px;
       border: 1px solid rgba(255, 255, 255, 0.5);
       background: linear-gradient(145deg, #fdfdfd, #d7d7d7);
-      box-shadow: 6px 6px 12px rgba(0, 0, 0, 0.15),
-                  -6px -6px 12px rgba(255, 255, 255, 0.6);
-      color: #505050;
+      box-shadow: 6px 6px 12px rgba(0, 0, 0, 0.35),
+                  -6px -6px 12px rgba(255, 255, 255, 0.4);
+      color: #333;
       font-weight: 600;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
@@ -134,10 +213,16 @@
   </style>
 </head>
 <body>
+  <canvas id="backgroundChart" aria-hidden="true"></canvas>
   <div class="container">
-    <div class="price">加载中...</div>
-    <div class="time"></div>
-    <div class="status" aria-live="polite">状态加载中...</div>
+    <div class="info-panel">
+      <div class="price">加载中...</div>
+      <div class="time"></div>
+      <div class="status" aria-live="polite">
+        <span class="status-indicator" role="presentation"></span>
+        <span class="status-text">状态加载中...</span>
+      </div>
+    </div>
     <div class="change-board" aria-live="polite">
       <div class="change-card">
         <div class="period">今日</div>
