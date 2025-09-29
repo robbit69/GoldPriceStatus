@@ -8,9 +8,17 @@ const fullscreenButton = document.getElementById('fullscreenButton');
 
 // 功能：管理布局高度并彻底关闭滚动
 const layoutController = (() => {
+  // 功能：兼容不同浏览器获取更精确的可视高度
+  function calculateViewportHeight() {
+    if (window.visualViewport && typeof window.visualViewport.height === 'number') {
+      return window.visualViewport.height;
+    }
+    return window.innerHeight;
+  }
+
   // 功能：在不同视口尺寸下同步 CSS 变量高度
   function setAppHeight() {
-    document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    document.documentElement.style.setProperty('--app-height', `${calculateViewportHeight()}px`);
   }
 
   // 功能：禁用浏览器滚轮与触摸滚动
@@ -26,6 +34,9 @@ const layoutController = (() => {
   disableManualScroll();
   window.addEventListener('resize', setAppHeight);
   window.addEventListener('orientationchange', setAppHeight);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setAppHeight);
+  }
 
   return {
     refreshHeight: setAppHeight
@@ -103,6 +114,239 @@ const fullscreenController = (() => {
   };
 })();
 
+// 功能：渲染背景折线图，提升视觉同时保持可读性
+const backgroundChartRenderer = (() => {
+  const canvas = document.getElementById('backgroundChart');
+
+  if (!canvas || !canvas.getContext) {
+    return {
+      render: () => {},
+      refresh: () => {}
+    };
+  }
+
+  const context = canvas.getContext('2d');
+  let cachedPoints = [];
+
+  // 功能：根据数据绘制折线
+  function drawChart() {
+    const rect = canvas.getBoundingClientRect();
+    const devicePixelRatio = window.devicePixelRatio || 1;
+
+    const displayWidth = Math.max(1, Math.floor(rect.width * devicePixelRatio));
+    const displayHeight = Math.max(1, Math.floor(rect.height * devicePixelRatio));
+
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!cachedPoints || cachedPoints.length < 2) {
+      return;
+    }
+
+    const priceValues = cachedPoints
+      .map(([, price]) => Number(price))
+      .filter((value) => Number.isFinite(value));
+
+    if (priceValues.length < 2) {
+      return;
+    }
+
+    const minPrice = Math.min(...priceValues);
+    const maxPrice = Math.max(...priceValues);
+    const priceRange = Math.max(maxPrice - minPrice, 0.0001);
+
+    const horizontalMargin = 120 * devicePixelRatio;
+    const verticalMargin = 100 * devicePixelRatio;
+    const chartWidth = Math.max(20 * devicePixelRatio, canvas.width - horizontalMargin * 2);
+    const chartHeight = Math.max(20 * devicePixelRatio, canvas.height - verticalMargin * 2);
+
+    const plottedPoints = priceValues.map((price, index) => {
+      const progress = index / (priceValues.length - 1);
+      const x = horizontalMargin + progress * chartWidth;
+      const y = canvas.height - verticalMargin - ((price - minPrice) / priceRange) * chartHeight;
+      return { x, y };
+    });
+
+    const firstPoint = plottedPoints[0];
+    const lastPoint = plottedPoints[plottedPoints.length - 1];
+
+    context.save();
+    context.beginPath();
+    plottedPoints.forEach(({ x, y }, index) => {
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.lineTo(lastPoint.x, canvas.height - verticalMargin);
+    context.lineTo(firstPoint.x, canvas.height - verticalMargin);
+    context.closePath();
+
+    const gradient = context.createLinearGradient(0, verticalMargin, 0, canvas.height - verticalMargin);
+    gradient.addColorStop(0, 'rgba(255, 210, 128, 0.24)');
+    gradient.addColorStop(1, 'rgba(255, 210, 128, 0.03)');
+    context.fillStyle = gradient;
+    context.fill();
+    context.restore();
+
+    context.save();
+    context.beginPath();
+    plottedPoints.forEach(({ x, y }, index) => {
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.strokeStyle = 'rgba(255, 214, 120, 0.85)';
+    context.lineWidth = 2.4 * devicePixelRatio;
+    context.shadowColor = 'rgba(255, 190, 92, 0.45)';
+    context.shadowBlur = 18 * devicePixelRatio;
+    context.stroke();
+    context.restore();
+
+    context.save();
+    const glowRadius = 42 * devicePixelRatio;
+    const glowGradient = context.createRadialGradient(
+      lastPoint.x,
+      lastPoint.y,
+      0,
+      lastPoint.x,
+      lastPoint.y,
+      glowRadius
+    );
+    glowGradient.addColorStop(0, 'rgba(255, 214, 120, 0.55)');
+    glowGradient.addColorStop(1, 'rgba(255, 214, 120, 0.02)');
+    context.fillStyle = glowGradient;
+    const glowX = Math.max(0, lastPoint.x - glowRadius);
+    const glowY = Math.max(0, lastPoint.y - glowRadius);
+    const glowWidth = Math.min(glowRadius * 2, canvas.width - glowX);
+    const glowHeight = Math.min(glowRadius * 2, canvas.height - glowY);
+    context.fillRect(glowX, glowY, glowWidth, glowHeight);
+    context.restore();
+  }
+
+  // 功能：保存数据并触发绘制
+  function render(dataPoints) {
+    cachedPoints = Array.isArray(dataPoints)
+      ? dataPoints
+          .slice(-240)
+          .filter((point) => Array.isArray(point) && point.length >= 2)
+          .sort((a, b) => a[0] - b[0])
+      : [];
+    drawChart();
+  }
+
+  // 功能：在视口尺寸发生变化时刷新画布
+  function refresh() {
+    drawChart();
+  }
+
+  window.addEventListener('resize', refresh);
+  window.addEventListener('orientationchange', refresh);
+
+  return {
+    render,
+    refresh
+  };
+})();
+
+// 功能：通过 Alpha Vantage API 获取市场开闭状态
+const marketStatusService = (() => {
+  const API_ENDPOINT = 'https://www.alphavantage.co/query?function=MARKET_STATUS&apikey=';
+  const REQUEST_TIMEOUT = 6500;
+  const CACHE_DURATION = 5 * 60 * 1000;
+
+  let cachedStatus = null;
+
+  // 功能：构造用于展示的默认状态对象
+  function createUnknownStatus(reason = '第三方市场状态不可用') {
+    return {
+      state: 'unknown',
+      detail: reason,
+      fetchedAt: Date.now(),
+      source: 'local'
+    };
+  }
+
+  // 功能：判断缓存是否仍然有效
+  function isCacheValid() {
+    if (!cachedStatus) {
+      return false;
+    }
+    if (cachedStatus.state === 'unknown') {
+      return false;
+    }
+    return Date.now() - cachedStatus.fetchedAt < CACHE_DURATION;
+  }
+
+  // 功能：调用第三方接口并解析外汇市场的开闭状态
+  async function fetchStatusFromAPI() {
+    const apiKey = (window.GOLD_APP && window.GOLD_APP.alphaVantageKey) || 'demo';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+    try {
+      const response = await fetch(`${API_ENDPOINT}${apiKey}`, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (GoldPriceStatus Dashboard)'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Alpha Vantage 请求失败：${response.status}`);
+      }
+
+      const payload = await response.json();
+      const markets = Array.isArray(payload.markets) ? payload.markets : [];
+      const forexMarket = markets.find((market) => market.market_type === 'Forex');
+
+      if (!forexMarket || typeof forexMarket.current_status !== 'string') {
+        throw new Error('未能从 Alpha Vantage 解析外汇市场状态');
+      }
+
+      const normalizedState = forexMarket.current_status.toLowerCase();
+
+      return {
+        state: normalizedState === 'open' ? 'open' : 'closed',
+        detail: `Alpha Vantage Forex 市场状态：${forexMarket.current_status}`,
+        fetchedAt: Date.now(),
+        source: 'Alpha Vantage'
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  // 功能：公开获取市场状态的方法，含缓存与兜底
+  async function getStatus() {
+    if (isCacheValid()) {
+      return cachedStatus;
+    }
+
+    try {
+      const status = await fetchStatusFromAPI();
+      cachedStatus = status;
+      return status;
+    } catch (error) {
+      console.error('获取第三方市场状态失败：', error);
+      const fallbackStatus = createUnknownStatus(error instanceof Error ? error.message : String(error));
+      return fallbackStatus;
+    }
+  }
+
+  return {
+    getStatus,
+    createUnknownStatus
+  };
+})();
+
 // 功能：请求金价数据并包含历史数据
 async function fetchGoldPrice() {
   try {
@@ -152,7 +396,7 @@ async function fetchGoldPrice() {
 }
 
 // 功能：刷新页面显示
-function updateDisplay(price, timestamp, dataPoints) {
+function updateDisplay(price, timestamp, dataPoints, remoteStatus = marketStatusService.createUnknownStatus()) {
   if (typeof price === 'number') {
     priceElement.textContent = price.toFixed(2) + ' CNY/克';
   } else {
@@ -167,36 +411,127 @@ function updateDisplay(price, timestamp, dataPoints) {
     timeElement.textContent = '—';
   }
 
-  marketStatusRenderer.render(timestamp);
+  marketStatusRenderer.render(timestamp, remoteStatus);
   changeBoardRenderer.render(dataPoints);
+  backgroundChartRenderer.render(dataPoints);
 }
 
 // 功能：负责渲染市场状态提示
 const marketStatusRenderer = (() => {
-  const CLOSED_THRESHOLD = 2 * 60 * 60 * 1000;
+  const STALE_THRESHOLD = 45 * 60 * 1000;
+  const TRADING_TIMEZONE = 'America/New_York';
+  const DAILY_BREAK_START = 17 * 60;
+  const DAILY_BREAK_END = 18 * 60;
+  const SUNDAY_OPEN_MINUTES = 18 * 60;
+  const FRIDAY_CLOSE_MINUTES = 17 * 60;
 
-  // 功能：根据时间戳判断是否停盘
-  function determineStatus(latestTimestamp) {
-    if (!latestTimestamp) {
-      return { text: '⛔ 数据不可用', className: 'stopped' };
+  // 功能：获取纽约时间的星期与分钟数
+  function getNewYorkTimeParts(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: TRADING_TIMEZONE,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(date);
+    const mapped = {};
+
+    parts.forEach((part) => {
+      if (part.type !== 'literal') {
+        mapped[part.type] = part.value;
+      }
+    });
+
+    return {
+      weekday: mapped.weekday,
+      hour: Number.parseInt(mapped.hour, 10),
+      minute: Number.parseInt(mapped.minute, 10)
+    };
+  }
+
+  // 功能：基于纽约时间判断是否处于休市时段
+  function isScheduledClosed(date = new Date()) {
+    const { weekday, hour, minute } = getNewYorkTimeParts(date);
+    const minutes = hour * 60 + minute;
+
+    if (weekday === 'Sat') {
+      return true;
     }
 
+    if (weekday === 'Sun' && minutes < SUNDAY_OPEN_MINUTES) {
+      return true;
+    }
+
+    if (weekday === 'Fri' && minutes >= FRIDAY_CLOSE_MINUTES) {
+      return true;
+    }
+
+    if (minutes >= DAILY_BREAK_START && minutes < DAILY_BREAK_END) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // 功能：根据时间戳与第三方状态综合判断市场状态
+  function determineStatus(latestTimestamp, remoteStatus) {
+    const normalizedStatus = remoteStatus && typeof remoteStatus === 'object' ? remoteStatus : marketStatusService.createUnknownStatus();
     const now = Date.now();
-    const diff = now - latestTimestamp;
+    const isDataStale = !latestTimestamp || now - latestTimestamp > STALE_THRESHOLD;
+    const scheduleClosed = isScheduledClosed(new Date(now));
 
-    if (diff > CLOSED_THRESHOLD) {
-      return { text: '⛔ 已停盘', className: 'stopped' };
+    if (scheduleClosed && normalizedStatus.state !== 'closed') {
+      return {
+        text: '⛔ 市场休市（按交易所日程）',
+        className: 'stopped',
+        tooltip: `${normalizedStatus.detail || 'Alpha Vantage 暂未提供休市信息'}；根据纽约时间判断当前应为休市`
+      };
     }
 
-    return { text: '🟢 交易中', className: 'active' };
+    if (normalizedStatus.state === 'closed') {
+      return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
+    }
+
+    if (normalizedStatus.state === 'open') {
+      if (!latestTimestamp) {
+        return { text: '🟠 市场交易中（无有效报价）', className: 'delayed', tooltip: normalizedStatus.detail };
+      }
+
+      if (isDataStale) {
+        return { text: '🟠 市场交易中（行情源延迟）', className: 'delayed', tooltip: normalizedStatus.detail };
+      }
+
+      return { text: '🟢 交易中', className: 'active', tooltip: normalizedStatus.detail };
+    }
+
+    if (!latestTimestamp) {
+      return { text: '⛔ 数据不可用', className: 'stopped', tooltip: normalizedStatus.detail };
+    }
+
+    if (scheduleClosed) {
+      return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
+    }
+
+    if (isDataStale) {
+      return { text: '⏸ 数据延迟', className: 'delayed', tooltip: normalizedStatus.detail };
+    }
+
+    return { text: '🟢 交易中', className: 'active', tooltip: normalizedStatus.detail };
   }
 
   // 功能：渲染市场状态
-  function render(latestTimestamp) {
-    const status = determineStatus(latestTimestamp);
+  function render(latestTimestamp, remoteStatus) {
+    const status = determineStatus(latestTimestamp, remoteStatus);
     statusElement.textContent = status.text;
-    statusElement.classList.remove('stopped', 'active');
+    statusElement.classList.remove('stopped', 'active', 'delayed');
     statusElement.classList.add(status.className);
+    if (status.tooltip) {
+      statusElement.setAttribute('title', status.tooltip);
+    } else {
+      statusElement.removeAttribute('title');
+    }
   }
 
   return { render };
@@ -287,13 +622,31 @@ const changeBoardRenderer = (() => {
   return { render };
 })();
 
+// 功能：统一刷新所有数据并处理错误
+async function refreshDashboard() {
+  try {
+    const [priceResult, statusResult] = await Promise.allSettled([
+      fetchGoldPrice(),
+      marketStatusService.getStatus()
+    ]);
+
+    const pricePayload = priceResult.status === 'fulfilled'
+      ? priceResult.value
+      : { price: '获取数据失败', timestamp: null, dataPoints: [] };
+
+    const remoteStatus = statusResult.status === 'fulfilled'
+      ? statusResult.value
+      : marketStatusService.createUnknownStatus(statusResult.reason instanceof Error ? statusResult.reason.message : '第三方状态请求失败');
+
+    updateDisplay(pricePayload.price, pricePayload.timestamp, pricePayload.dataPoints, remoteStatus);
+  } catch (error) {
+    console.error('刷新页面时出现错误：', error);
+  }
+}
+
 // 功能：初始化页面并定时刷新
 (async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
+  await refreshDashboard();
 })();
 
-setInterval(async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
-}, 60000);
+setInterval(refreshDashboard, 60000);
