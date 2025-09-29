@@ -8,17 +8,9 @@ const fullscreenButton = document.getElementById('fullscreenButton');
 
 // 功能：管理布局高度并彻底关闭滚动
 const layoutController = (() => {
-  // 功能：兼容不同浏览器获取更精确的可视高度
-  function calculateViewportHeight() {
-    if (window.visualViewport && typeof window.visualViewport.height === 'number') {
-      return window.visualViewport.height;
-    }
-    return window.innerHeight;
-  }
-
   // 功能：在不同视口尺寸下同步 CSS 变量高度
   function setAppHeight() {
-    document.documentElement.style.setProperty('--app-height', `${calculateViewportHeight()}px`);
+    document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
   }
 
   // 功能：禁用浏览器滚轮与触摸滚动
@@ -34,9 +26,6 @@ const layoutController = (() => {
   disableManualScroll();
   window.addEventListener('resize', setAppHeight);
   window.addEventListener('orientationchange', setAppHeight);
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', setAppHeight);
-  }
 
   return {
     refreshHeight: setAppHeight
@@ -481,16 +470,6 @@ const marketStatusRenderer = (() => {
     const now = Date.now();
     const isDataStale = !latestTimestamp || now - latestTimestamp > STALE_THRESHOLD;
 
-    const scheduleClosed = isScheduledClosed(new Date(now));
-
-    if (scheduleClosed && normalizedStatus.state !== 'closed') {
-      return {
-        text: '⛔ 市场休市（按交易所日程）',
-        className: 'stopped',
-        tooltip: `${normalizedStatus.detail || 'Alpha Vantage 暂未提供休市信息'}；根据纽约时间判断当前应为休市`
-      };
-    }
-
     if (normalizedStatus.state === 'closed') {
       return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
     }
@@ -511,9 +490,10 @@ const marketStatusRenderer = (() => {
       return { text: '⛔ 数据不可用', className: 'stopped', tooltip: normalizedStatus.detail };
     }
 
-    if (scheduleClosed) {
+    if (isScheduledClosed(new Date(now))) {
       return { text: '⛔ 市场休市', className: 'stopped', tooltip: normalizedStatus.detail };
     }
+
     if (isDataStale) {
       return { text: '⏸ 数据延迟', className: 'delayed', tooltip: normalizedStatus.detail };
     }
