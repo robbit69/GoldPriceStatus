@@ -2,12 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>金价监控</title>
   <style>
     :root {
       --app-height: 100vh; /* 通过 JS 动态更新，保证移动端高度准确 */
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
     }
     html,
     body {
@@ -30,10 +34,11 @@
       touch-action: manipulation; /* 禁止滚动手势但保留点击 */
     }
     #backgroundChart {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
       z-index: 0;
       opacity: 0.6;
       pointer-events: none;
@@ -46,6 +51,9 @@
       flex-direction: column;
       gap: 1.2em;
       width: min(90vw, 70%);
+      padding-left: max(var(--safe-left), 18px);
+      padding-right: max(var(--safe-right), 18px);
+      box-sizing: border-box;
       height: 100%;
       position: relative;
       z-index: 1;
@@ -89,6 +97,8 @@
       backdrop-filter: blur(10px);
       box-shadow: 0 16px 36px rgba(212, 175, 55, 0.18),
                   inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+      position: relative;
+      cursor: pointer;
     }
     .change-card .period {
       font-size: 1.9vw;
@@ -102,6 +112,25 @@
     .change-card .change-extra {
       font-size: 1.6vw;
       color: rgba(168, 134, 26, 0.75);
+    }
+    .change-card .indicator {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(180, 180, 180, 0.35);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+      transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .change-card.active .indicator {
+      background: rgba(246, 196, 76, 0.85);
+      box-shadow: 0 0 8px rgba(246, 196, 76, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+    }
+    .change-card:focus-visible {
+      outline: 2px solid rgba(246, 196, 76, 0.6);
+      outline-offset: 4px;
     }
     /* 全屏时的 body 背景色 */
     .fullscreen {
@@ -155,17 +184,20 @@
     <div class="time"></div>
     <div class="status" aria-live="polite">状态加载中...</div>
     <div class="change-board" aria-live="polite">
-      <div class="change-card">
-        <div class="period">今日</div>
+      <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
+        <span class="indicator" aria-hidden="true"></span>
+        <div class="period">过去 24H</div>
         <div class="change-value" data-period="day">—</div>
         <div class="change-extra" data-extra="day">—</div>
       </div>
-      <div class="change-card">
+      <div class="change-card" data-card-period="week" role="button" tabindex="0" aria-pressed="false">
+        <span class="indicator" aria-hidden="true"></span>
         <div class="period">过去 7 天</div>
         <div class="change-value" data-period="week">—</div>
         <div class="change-extra" data-extra="week">—</div>
       </div>
-      <div class="change-card">
+      <div class="change-card" data-card-period="month" role="button" tabindex="0" aria-pressed="false">
+        <span class="indicator" aria-hidden="true"></span>
         <div class="period">过去 30 天</div>
         <div class="change-value" data-period="month">—</div>
         <div class="change-extra" data-extra="month">—</div>

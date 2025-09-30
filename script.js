@@ -7,6 +7,25 @@ const changeExtraElements = document.querySelectorAll('.change-extra');
 const fullscreenButton = document.getElementById('fullscreenButton');
 const backgroundCanvas = document.getElementById('backgroundChart');
 const backgroundCtx = backgroundCanvas ? backgroundCanvas.getContext('2d') : null;
+const changeCards = document.querySelectorAll('.change-card');
+
+let selectedPeriod = 'day';
+
+
+function readSafeAreaInsets() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const parseInset = (propertyName) => {
+    const value = rootStyle.getPropertyValue(propertyName);
+    return Number.parseFloat(value) || 0;
+  };
+
+  return {
+    top: parseInset('--safe-top'),
+    right: parseInset('--safe-right'),
+    bottom: parseInset('--safe-bottom'),
+    left: parseInset('--safe-left')
+  };
+}
 
 const PERIOD_RANGES = {
   day: 24 * 60 * 60 * 1000,
@@ -16,6 +35,29 @@ const PERIOD_RANGES = {
 
 function createEmptySeriesMap() {
   return Object.fromEntries(Object.keys(PERIOD_RANGES).map((key) => [key, []]));
+}
+
+let cachedSeriesByPeriod = createEmptySeriesMap();
+
+function updateCardSelectionUI() {
+  changeCards.forEach((card) => {
+    const period = card.getAttribute('data-card-period');
+    const isActive = period === selectedPeriod;
+    card.classList.toggle('active', isActive);
+    card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+}
+
+function setSelectedPeriod(period) {
+  if (!Object.prototype.hasOwnProperty.call(PERIOD_RANGES, period)) {
+    return;
+  }
+  if (selectedPeriod === period) {
+    return;
+  }
+  selectedPeriod = period;
+  updateCardSelectionUI();
+  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod);
 }
 
 // 功能：管理布局高度并彻底关闭滚动
@@ -164,6 +206,9 @@ const chartRenderer = (() => {
       return;
     }
 
+    const safeArea = readSafeAreaInsets();
+    const availableHeight = Math.max(height - safeArea.top - safeArea.bottom, 1);
+
     const times = cachedSeries.map(([timestamp]) => timestamp);
     const prices = cachedSeries.map(([, price]) => price);
 
@@ -175,10 +220,8 @@ const chartRenderer = (() => {
     const timeRange = maxTime - minTime || 1;
     const priceRange = maxPrice - minPrice || 1;
 
-    const chartTop = height * 0.05;
-    const chartBottom = height * 0.8;
-    const chartHeight = chartBottom - chartTop;
-    const verticalOffset = chartTop;
+    const chartHeight = availableHeight * 0.7;
+    const verticalOffset = safeArea.top + (availableHeight - chartHeight) / 2;
 
     const toX = (timestamp) => {
       const ratio = (timestamp - minTime) / timeRange;
@@ -211,8 +254,8 @@ const chartRenderer = (() => {
     backgroundCtx.stroke();
 
     // 绘制填充区域
-    const fillBaselineY = height;
-    const gradient = backgroundCtx.createLinearGradient(0, verticalOffset, 0, fillBaselineY);
+    const fillBaselineY = height - safeArea.bottom;
+    const gradient = backgroundCtx.createLinearGradient(0, verticalOffset, 0, fillBaselineY + safeArea.bottom);
     gradient.addColorStop(0, 'rgba(236, 198, 76, 0.5)');
     gradient.addColorStop(1, 'rgba(236, 198, 76, 0.05)');
 
@@ -233,9 +276,10 @@ const chartRenderer = (() => {
   scheduleDraw();
 
   return {
-    render(seriesByPeriod = {}) {
-      const daySeries = Array.isArray(seriesByPeriod.day) ? seriesByPeriod.day : [];
-      cachedSeries = daySeries.filter((point) => Array.isArray(point) && point.length >= 2);
+    render(seriesByPeriod = {}, period = 'day') {
+      const activePeriod = Object.prototype.hasOwnProperty.call(PERIOD_RANGES, period) ? period : 'day';
+      const rawSeries = Array.isArray(seriesByPeriod[activePeriod]) ? seriesByPeriod[activePeriod] : [];
+      cachedSeries = rawSeries.filter((point) => Array.isArray(point) && point.length >= 2);
       scheduleDraw();
     }
   };
@@ -352,8 +396,9 @@ function updateDisplay(price, timestamp, seriesByPeriod) {
   }
 
   marketStatusRenderer.render(timestamp);
-  changeBoardRenderer.render(seriesByPeriod);
-  chartRenderer.render(seriesByPeriod);
+  cachedSeriesByPeriod = Object.assign(createEmptySeriesMap(), seriesByPeriod);
+  changeBoardRenderer.render(cachedSeriesByPeriod);
+  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod);
 }
 
 // 功能：负责渲染市场状态提示
@@ -466,10 +511,33 @@ const changeBoardRenderer = (() => {
       const { extraText } = formatChange(changeData);
       element.textContent = extraText;
     });
+
+    updateCardSelectionUI();
   }
 
   return { render };
 })();
+
+changeCards.forEach((card) => {
+  const period = card.getAttribute('data-card-period');
+  if (!Object.prototype.hasOwnProperty.call(PERIOD_RANGES, period)) {
+    return;
+  }
+
+  card.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setSelectedPeriod(period);
+  });
+
+  card.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setSelectedPeriod(period);
+    }
+  });
+});
+
+updateCardSelectionUI();
 
 // 功能：初始化页面并定时刷新
 (async () => {
