@@ -175,53 +175,56 @@ const chartRenderer = (() => {
     const timeRange = maxTime - minTime || 1;
     const priceRange = maxPrice - minPrice || 1;
 
-    const paddingX = Math.min(40, width * 0.08);
-    const paddingY = Math.min(40, height * 0.12);
+    const chartTop = height * 0.05;
+    const chartBottom = height * 0.8;
+    const chartHeight = chartBottom - chartTop;
+    const verticalOffset = chartTop;
 
-    const toX = (timestamp) => paddingX + ((timestamp - minTime) / timeRange) * (width - paddingX * 2);
-    const toY = (price) => height - paddingY - ((price - minPrice) / priceRange) * (height - paddingY * 2);
+    const toX = (timestamp) => {
+      const ratio = (timestamp - minTime) / timeRange;
+      const x = ratio * width;
+      return Math.min(width, Math.max(0, x));
+    };
+    const toY = (price) => {
+      const normalized = (price - minPrice) / priceRange;
+      return verticalOffset + chartHeight - normalized * chartHeight;
+    };
 
-    const linePath = new Path2D();
-    const areaPath = new Path2D();
+    const firstPoint = cachedSeries[0];
+    const lastPoint = cachedSeries[cachedSeries.length - 1];
 
-    let firstPoint = null;
-    let lastPoint = null;
-
+    // 绘制折线
+    backgroundCtx.beginPath();
     cachedSeries.forEach(([timestamp, price], index) => {
       const x = toX(timestamp);
       const y = toY(price);
-
       if (index === 0) {
-        linePath.moveTo(x, y);
-        areaPath.moveTo(x, y);
-        firstPoint = { x, y };
+        backgroundCtx.moveTo(x, y);
       } else {
-        linePath.lineTo(x, y);
-        areaPath.lineTo(x, y);
+        backgroundCtx.lineTo(x, y);
       }
-
-      lastPoint = { x, y };
     });
-
-    if (!firstPoint || !lastPoint) {
-      return;
-    }
-
-    areaPath.lineTo(lastPoint.x, height - paddingY);
-    areaPath.lineTo(firstPoint.x, height - paddingY);
-    areaPath.closePath();
-
-    backgroundCtx.lineWidth = 2.6;
+    backgroundCtx.lineWidth = 3.2;
     backgroundCtx.lineJoin = 'round';
     backgroundCtx.lineCap = 'round';
-    backgroundCtx.strokeStyle = 'rgba(212, 175, 55, 0.8)';
-    backgroundCtx.stroke(linePath);
+    backgroundCtx.strokeStyle = 'rgba(236, 198, 76, 0.95)';
+    backgroundCtx.stroke();
 
-    const gradient = backgroundCtx.createLinearGradient(0, paddingY, 0, height - paddingY);
-    gradient.addColorStop(0, 'rgba(212, 175, 55, 0.36)');
-    gradient.addColorStop(1, 'rgba(212, 175, 55, 0.14)');
+    // 绘制填充区域
+    const fillBaselineY = height;
+    const gradient = backgroundCtx.createLinearGradient(0, verticalOffset, 0, fillBaselineY);
+    gradient.addColorStop(0, 'rgba(236, 198, 76, 0.5)');
+    gradient.addColorStop(1, 'rgba(236, 198, 76, 0.05)');
+
+    backgroundCtx.beginPath();
+    backgroundCtx.moveTo(toX(firstPoint[0]), fillBaselineY);
+    cachedSeries.forEach(([timestamp, price]) => {
+      backgroundCtx.lineTo(toX(timestamp), toY(price));
+    });
+    backgroundCtx.lineTo(toX(lastPoint[0]), fillBaselineY);
+    backgroundCtx.closePath();
     backgroundCtx.fillStyle = gradient;
-    backgroundCtx.fill(areaPath);
+    backgroundCtx.fill();
   }
 
   window.addEventListener('resize', scheduleDraw);

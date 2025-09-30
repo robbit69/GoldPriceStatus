@@ -35,7 +35,7 @@
       width: 100%;
       height: 100%;
       z-index: 0;
-      opacity: 0.45;
+      opacity: 0.6;
       pointer-events: none;
     }
     .container {
@@ -80,25 +80,28 @@
       margin-top: 0.6em;
     }
     .change-card {
-      background: rgba(255, 255, 255, 0.16);
-      border-radius: 12px;
-      padding: 0.4em 1em;
+      background: rgba(255, 255, 255, 0.36);
+      border-radius: 14px;
+      padding: 0.45em 1.1em;
       display: flex;
       flex-direction: column;
-      gap: 0.3em;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      gap: 0.35em;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 16px 36px rgba(212, 175, 55, 0.18),
+                  inset 0 0 0 1px rgba(255, 255, 255, 0.35);
     }
     .change-card .period {
       font-size: 1.9vw;
-      color: rgba(202, 179, 77, 0.55);
+      color: rgba(168, 134, 26, 0.82);
     }
     .change-card .change-value {
       font-size: 2.4vw;
       font-weight: 700;
+      color: #c28c13;
     }
     .change-card .change-extra {
       font-size: 1.6vw;
-      color: rgba(202, 179, 77, 0.55);
+      color: rgba(168, 134, 26, 0.75);
     }
     /* 全屏时的 body 背景色 */
     .fullscreen {
