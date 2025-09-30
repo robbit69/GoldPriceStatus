@@ -5,6 +5,8 @@ const statusElement = document.querySelector('.status');
 const changeValueElements = document.querySelectorAll('.change-value');
 const changeExtraElements = document.querySelectorAll('.change-extra');
 const fullscreenButton = document.getElementById('fullscreenButton');
+const backgroundCanvas = document.getElementById('backgroundChart');
+const backgroundCtx = backgroundCanvas ? backgroundCanvas.getContext('2d') : null;
 
 const PERIOD_RANGES = {
   day: 24 * 60 * 60 * 1000,
@@ -110,6 +112,129 @@ const fullscreenController = (() => {
   return {
     requestFullscreen,
     exitFullscreen
+  };
+})();
+
+// 功能：负责在背景绘制折线图
+const chartRenderer = (() => {
+  if (!backgroundCanvas || !backgroundCtx) {
+    return { render() {} };
+  }
+
+  let cachedSeries = [];
+  let pendingFrame = null;
+
+  function scheduleDraw() {
+    if (pendingFrame) {
+      cancelAnimationFrame(pendingFrame);
+    }
+    pendingFrame = requestAnimationFrame(() => {
+      pendingFrame = null;
+      draw();
+    });
+  }
+
+  function resizeCanvas() {
+    const width = backgroundCanvas.clientWidth;
+    const height = backgroundCanvas.clientHeight;
+
+    if (!width || !height) {
+      return null;
+    }
+
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    backgroundCanvas.width = width * devicePixelRatio;
+    backgroundCanvas.height = height * devicePixelRatio;
+    backgroundCtx.setTransform(1, 0, 0, 1, 0, 0);
+    backgroundCtx.scale(devicePixelRatio, devicePixelRatio);
+
+    return { width, height };
+  }
+
+  function draw() {
+    const dimensions = resizeCanvas();
+    if (!dimensions) {
+      return;
+    }
+
+    const { width, height } = dimensions;
+    backgroundCtx.clearRect(0, 0, width, height);
+
+    if (!Array.isArray(cachedSeries) || cachedSeries.length < 2) {
+      return;
+    }
+
+    const times = cachedSeries.map(([timestamp]) => timestamp);
+    const prices = cachedSeries.map(([, price]) => price);
+
+    const minTime = Math.min(...times);
+    const maxTime = Math.max(...times);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+
+    const timeRange = maxTime - minTime || 1;
+    const priceRange = maxPrice - minPrice || 1;
+
+    const paddingX = Math.min(40, width * 0.08);
+    const paddingY = Math.min(40, height * 0.12);
+
+    const toX = (timestamp) => paddingX + ((timestamp - minTime) / timeRange) * (width - paddingX * 2);
+    const toY = (price) => height - paddingY - ((price - minPrice) / priceRange) * (height - paddingY * 2);
+
+    const linePath = new Path2D();
+    const areaPath = new Path2D();
+
+    let firstPoint = null;
+    let lastPoint = null;
+
+    cachedSeries.forEach(([timestamp, price], index) => {
+      const x = toX(timestamp);
+      const y = toY(price);
+
+      if (index === 0) {
+        linePath.moveTo(x, y);
+        areaPath.moveTo(x, y);
+        firstPoint = { x, y };
+      } else {
+        linePath.lineTo(x, y);
+        areaPath.lineTo(x, y);
+      }
+
+      lastPoint = { x, y };
+    });
+
+    if (!firstPoint || !lastPoint) {
+      return;
+    }
+
+    areaPath.lineTo(lastPoint.x, height - paddingY);
+    areaPath.lineTo(firstPoint.x, height - paddingY);
+    areaPath.closePath();
+
+    backgroundCtx.lineWidth = 2.6;
+    backgroundCtx.lineJoin = 'round';
+    backgroundCtx.lineCap = 'round';
+    backgroundCtx.strokeStyle = 'rgba(212, 175, 55, 0.8)';
+    backgroundCtx.stroke(linePath);
+
+    const gradient = backgroundCtx.createLinearGradient(0, paddingY, 0, height - paddingY);
+    gradient.addColorStop(0, 'rgba(212, 175, 55, 0.36)');
+    gradient.addColorStop(1, 'rgba(212, 175, 55, 0.14)');
+    backgroundCtx.fillStyle = gradient;
+    backgroundCtx.fill(areaPath);
+  }
+
+  window.addEventListener('resize', scheduleDraw);
+  window.addEventListener('orientationchange', scheduleDraw);
+
+  scheduleDraw();
+
+  return {
+    render(seriesByPeriod = {}) {
+      const daySeries = Array.isArray(seriesByPeriod.day) ? seriesByPeriod.day : [];
+      cachedSeries = daySeries.filter((point) => Array.isArray(point) && point.length >= 2);
+      scheduleDraw();
+    }
   };
 })();
 
@@ -225,6 +350,7 @@ function updateDisplay(price, timestamp, seriesByPeriod) {
 
   marketStatusRenderer.render(timestamp);
   changeBoardRenderer.render(seriesByPeriod);
+  chartRenderer.render(seriesByPeriod);
 }
 
 // 功能：负责渲染市场状态提示
