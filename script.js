@@ -57,7 +57,7 @@ function setSelectedPeriod(period) {
   }
   selectedPeriod = period;
   updateCardSelectionUI();
-  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod);
+  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, true);
 }
 
 // 功能：管理布局高度并彻底关闭滚动
@@ -163,18 +163,12 @@ const chartRenderer = (() => {
     return { render() {} };
   }
 
+  const ANIMATION_DURATION = 650;
   let cachedSeries = [];
-  let pendingFrame = null;
-
-  function scheduleDraw() {
-    if (pendingFrame) {
-      cancelAnimationFrame(pendingFrame);
-    }
-    pendingFrame = requestAnimationFrame(() => {
-      pendingFrame = null;
-      draw();
-    });
-  }
+  let animationFrame = null;
+  let resizeFrame = null;
+  let animationStartTime = 0;
+  let lastDrawProgress = 1;
 
   function resizeCanvas() {
     const width = backgroundCanvas.clientWidth;
@@ -193,7 +187,45 @@ const chartRenderer = (() => {
     return { width, height };
   }
 
-  function draw() {
+  function cancelAnimation() {
+    if (animationFrame) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  }
+
+  function interpolateSeries(progress) {
+    if (!Array.isArray(cachedSeries) || cachedSeries.length === 0) {
+      return [];
+    }
+
+    if (cachedSeries.length === 1) {
+      return [cachedSeries[0]];
+    }
+
+    const totalSegments = cachedSeries.length - 1;
+    const scaledIndex = Math.min(Math.max(progress, 0), 1) * totalSegments;
+    const endIndex = Math.floor(scaledIndex);
+    const fraction = scaledIndex - endIndex;
+    const visible = cachedSeries.slice(0, Math.min(endIndex + 1, cachedSeries.length));
+
+    if (fraction > 0 && endIndex + 1 < cachedSeries.length) {
+      const [startTime, startPrice] = cachedSeries[endIndex];
+      const [endTime, endPrice] = cachedSeries[endIndex + 1];
+      visible.push([
+        startTime + (endTime - startTime) * fraction,
+        startPrice + (endPrice - startPrice) * fraction
+      ]);
+    }
+
+    if (visible.length === 0 && cachedSeries.length > 0) {
+      visible.push(cachedSeries[0]);
+    }
+
+    return visible;
+  }
+
+  function draw(progress = 1) {
     const dimensions = resizeCanvas();
     if (!dimensions) {
       return;
@@ -202,7 +234,7 @@ const chartRenderer = (() => {
     const { width, height } = dimensions;
     backgroundCtx.clearRect(0, 0, width, height);
 
-    if (!Array.isArray(cachedSeries) || cachedSeries.length < 2) {
+    if (!Array.isArray(cachedSeries) || cachedSeries.length === 0) {
       return;
     }
 
@@ -233,12 +265,29 @@ const chartRenderer = (() => {
       return verticalOffset + chartHeight - normalized * chartHeight;
     };
 
-    const firstPoint = cachedSeries[0];
-    const lastPoint = cachedSeries[cachedSeries.length - 1];
+    const visibleSeries = interpolateSeries(progress);
+
+    if (visibleSeries.length === 0) {
+      return;
+    }
+
+    if (visibleSeries.length === 1) {
+      const [timestamp, price] = visibleSeries[0];
+      const x = toX(timestamp);
+      const y = toY(price);
+      backgroundCtx.beginPath();
+      backgroundCtx.arc(x, y, 3, 0, Math.PI * 2);
+      backgroundCtx.fillStyle = 'rgba(236, 198, 76, 0.95)';
+      backgroundCtx.fill();
+      return;
+    }
+
+    const firstPoint = visibleSeries[0];
+    const lastPoint = visibleSeries[visibleSeries.length - 1];
 
     // 绘制折线
     backgroundCtx.beginPath();
-    cachedSeries.forEach(([timestamp, price], index) => {
+    visibleSeries.forEach(([timestamp, price], index) => {
       const x = toX(timestamp);
       const y = toY(price);
       if (index === 0) {
@@ -261,7 +310,7 @@ const chartRenderer = (() => {
 
     backgroundCtx.beginPath();
     backgroundCtx.moveTo(toX(firstPoint[0]), fillBaselineY);
-    cachedSeries.forEach(([timestamp, price]) => {
+    visibleSeries.forEach(([timestamp, price]) => {
       backgroundCtx.lineTo(toX(timestamp), toY(price));
     });
     backgroundCtx.lineTo(toX(lastPoint[0]), fillBaselineY);
@@ -270,17 +319,72 @@ const chartRenderer = (() => {
     backgroundCtx.fill();
   }
 
-  window.addEventListener('resize', scheduleDraw);
-  window.addEventListener('orientationchange', scheduleDraw);
+  function startAnimation() {
+    cancelAnimation();
+    animationStartTime = performance.now();
 
-  scheduleDraw();
+    const step = (timestamp) => {
+      const progress = Math.min((timestamp - animationStartTime) / ANIMATION_DURATION, 1);
+      lastDrawProgress = progress;
+      draw(progress);
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(step);
+      } else {
+        animationFrame = null;
+      }
+    };
+
+    animationFrame = requestAnimationFrame(step);
+  }
+
+  function requestStaticDraw(progress = 1) {
+    if (animationFrame) {
+      return;
+    }
+
+    const clampedProgress = Math.min(Math.max(progress, 0), 1);
+
+    if (resizeFrame) {
+      cancelAnimationFrame(resizeFrame);
+    }
+
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null;
+      draw(clampedProgress);
+      lastDrawProgress = clampedProgress;
+    });
+  }
+
+  window.addEventListener('resize', () => requestStaticDraw(lastDrawProgress));
+  window.addEventListener('orientationchange', () => requestStaticDraw(lastDrawProgress));
+
+  requestStaticDraw();
 
   return {
-    render(seriesByPeriod = {}, period = 'day') {
+    render(seriesByPeriod = {}, period = 'day', shouldAnimate = false) {
       const activePeriod = Object.prototype.hasOwnProperty.call(PERIOD_RANGES, period) ? period : 'day';
       const rawSeries = Array.isArray(seriesByPeriod[activePeriod]) ? seriesByPeriod[activePeriod] : [];
       cachedSeries = rawSeries.filter((point) => Array.isArray(point) && point.length >= 2);
-      scheduleDraw();
+
+      if (resizeFrame) {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = null;
+      }
+
+      if (cachedSeries.length < 2) {
+        cancelAnimation();
+        requestStaticDraw();
+        return;
+      }
+
+      if (shouldAnimate) {
+        lastDrawProgress = 0;
+        startAnimation();
+      } else {
+        cancelAnimation();
+        requestStaticDraw();
+      }
     }
   };
 })();
@@ -380,7 +484,7 @@ async function fetchGoldPrice() {
 }
 
 // 功能：刷新页面显示
-function updateDisplay(price, timestamp, seriesByPeriod) {
+function updateDisplay(price, timestamp, seriesByPeriod, shouldAnimate = false) {
   if (typeof price === 'number') {
     priceElement.textContent = price.toFixed(2) + ' CNY/克';
   } else {
@@ -398,7 +502,7 @@ function updateDisplay(price, timestamp, seriesByPeriod) {
   marketStatusRenderer.render(timestamp);
   cachedSeriesByPeriod = Object.assign(createEmptySeriesMap(), seriesByPeriod);
   changeBoardRenderer.render(cachedSeriesByPeriod);
-  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod);
+  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, shouldAnimate);
 }
 
 // 功能：负责渲染市场状态提示
@@ -477,15 +581,25 @@ const changeBoardRenderer = (() => {
   // 功能：将涨跌幅格式化为文本
   function formatChange(changeData) {
     if (!changeData) {
-      return { valueText: '—', extraText: '暂无数据' };
+      return {
+        arrowSymbol: '—',
+        valueLines: ['—', '—'],
+        extraText: '暂无数据',
+        direction: 'none'
+      };
     }
 
     const { changeValue, changePercent, baselinePrice } = changeData;
-    const sign = changeValue >= 0 ? '+' : '';
-    const valueText = `${sign}${changeValue.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`;
+    const direction = changeValue > 0 ? 'up' : changeValue < 0 ? 'down' : 'flat';
+    const absoluteValue = Math.abs(changeValue).toFixed(2);
+    const absolutePercent = Math.abs(changePercent).toFixed(2);
+    const arrowSymbol = direction === 'up' ? '▲' : direction === 'down' ? '▼' : '▬';
+    const signedValue = changeValue > 0 ? `${absoluteValue} CNY` : changeValue < 0 ? `${absoluteValue} CNY` : absoluteValue;
+    const signedPercent = changePercent > 0 ? `${absolutePercent}%` : changePercent < 0 ? `${absolutePercent}%` : `${absolutePercent}%`;
+    const valueLines = [signedValue, signedPercent];
     const extraText = `起始价：${baselinePrice.toFixed(2)}`;
 
-    return { valueText, extraText };
+    return { arrowSymbol, valueLines, extraText, direction };
   }
 
   // 功能：渲染涨跌信息
@@ -501,8 +615,21 @@ const changeBoardRenderer = (() => {
     changeValueElements.forEach((element) => {
       const period = element.getAttribute('data-period');
       const changeData = changeCache[period];
-      const { valueText } = formatChange(changeData);
-      element.textContent = valueText;
+      const { arrowSymbol, valueLines, direction } = formatChange(changeData);
+      element.innerHTML =
+        `<span class="change-arrow" aria-hidden="true">${arrowSymbol}</span>` +
+        `<span class="change-lines">` +
+        `<span class="change-line">${valueLines[0]}</span>` +
+        `<span class="change-line">${valueLines[1]}</span>` +
+        `</span>`;
+      element.classList.remove('change-up', 'change-down', 'change-flat');
+      if (direction === 'up') {
+        element.classList.add('change-up');
+      } else if (direction === 'down') {
+        element.classList.add('change-down');
+      } else if (direction === 'flat') {
+        element.classList.add('change-flat');
+      }
     });
 
     changeExtraElements.forEach((element) => {
@@ -542,10 +669,10 @@ updateCardSelectionUI();
 // 功能：初始化页面并定时刷新
 (async () => {
   const { price, timestamp, seriesByPeriod } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, seriesByPeriod);
+  updateDisplay(price, timestamp, seriesByPeriod, true);
 })();
 
 setInterval(async () => {
   const { price, timestamp, seriesByPeriod } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, seriesByPeriod);
+  updateDisplay(price, timestamp, seriesByPeriod, false);
 }, 60000);
