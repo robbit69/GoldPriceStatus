@@ -6,6 +6,16 @@ const changeValueElements = document.querySelectorAll('.change-value');
 const changeExtraElements = document.querySelectorAll('.change-extra');
 const fullscreenButton = document.getElementById('fullscreenButton');
 
+const PERIOD_RANGES = {
+  day: 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000,
+  month: 30 * 24 * 60 * 60 * 1000
+};
+
+function createEmptySeriesMap() {
+  return Object.fromEntries(Object.keys(PERIOD_RANGES).map((key) => [key, []]));
+}
+
 // 功能：管理布局高度并彻底关闭滚动
 const layoutController = (() => {
   // 功能：在不同视口尺寸下同步 CSS 变量高度
@@ -103,18 +113,16 @@ const fullscreenController = (() => {
   };
 })();
 
-// 功能：请求金价数据并包含历史数据
-async function fetchGoldPrice() {
-  try {
-    const now = Date.now();
-    const monthRange = 24 * 60 * 60 * 1000;
-    const starttime = now - monthRange;
-    const targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams&starttime=${starttime}&endtime=${now}`;
-    let response;
-    let retryCount = 0;
-    const maxRetries = 3;
+// 功能：请求指定时间范围内的金价序列
+async function fetchPriceSeries(starttime, endtime) {
+  const targetUrl = `https://api.goldprice.yanrrd.com/price?currency=cny&unit=grams&starttime=${starttime}&endtime=${endtime}`;
+  let response;
+  let retryCount = 0;
+  const maxRetries = 3;
+  let lastError = null;
 
-    while (retryCount < maxRetries) {
+  while (retryCount < maxRetries) {
+    try {
       response = await fetch(targetUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Compatible; Browser)'
@@ -125,34 +133,82 @@ async function fetchGoldPrice() {
         break;
       }
 
-      retryCount++;
-      if (retryCount === maxRetries) {
-        throw new Error(`请求失败,状态码: ${response.status}`);
+      lastError = new Error(`请求失败,状态码: ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    retryCount += 1;
+    if (retryCount === maxRetries) {
+      throw lastError || new Error('请求失败');
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  if (!response) {
+    throw lastError || new Error('未获取到响应');
+  }
+
+  const responseData = await response.json();
+  const currencyKey = (responseData.currency || 'CNY').toUpperCase();
+  const dataPoints = responseData.chartData && responseData.chartData[currencyKey];
+
+  if (Array.isArray(dataPoints)) {
+    return dataPoints;
+  }
+
+  return [];
+}
+
+// 功能：请求金价数据并包含多周期历史数据
+async function fetchGoldPrice() {
+  try {
+    const now = Date.now();
+    const periodEntries = Object.entries(PERIOD_RANGES);
+    const seriesByPeriod = createEmptySeriesMap();
+
+    const results = await Promise.allSettled(
+      periodEntries.map(([_, duration]) => fetchPriceSeries(now - duration, now))
+    );
+
+    results.forEach((result, index) => {
+      const period = periodEntries[index][0];
+
+      if (result.status === 'fulfilled') {
+        seriesByPeriod[period] = result.value;
+      } else {
+        console.error(`获取 ${period} 周期数据失败:`, result.reason);
       }
+    });
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    const orderedPeriods = ['day', 'week', 'month'];
+    let latestPoint = null;
+
+    orderedPeriods.forEach((period) => {
+      const series = seriesByPeriod[period];
+      if (Array.isArray(series) && series.length > 0) {
+        const candidate = series[series.length - 1];
+        if (!latestPoint || candidate[0] > latestPoint[0]) {
+          latestPoint = candidate;
+        }
+      }
+    });
+
+    if (latestPoint) {
+      return { price: latestPoint[1], timestamp: latestPoint[0], seriesByPeriod };
     }
 
-    const responseData = await response.json();
-
-    const currencyKey = (responseData.currency || 'CNY').toUpperCase();
-    const dataPoints = responseData.chartData && responseData.chartData[currencyKey] ? responseData.chartData[currencyKey] : [];
-
-    if (dataPoints.length > 0) {
-      const latest = dataPoints[dataPoints.length - 1];
-      return { price: latest[1], timestamp: latest[0], dataPoints };
-    }
-
-    return { price: '无数据', timestamp: null, dataPoints: [] };
+    return { price: '无数据', timestamp: null, seriesByPeriod };
   } catch (error) {
     console.error('Fetch error:', error);
     console.error('获取数据失败');
-    return { price: '获取数据失败', timestamp: null, dataPoints: [] };
+    return { price: '获取数据失败', timestamp: null, seriesByPeriod: createEmptySeriesMap() };
   }
 }
 
 // 功能：刷新页面显示
-function updateDisplay(price, timestamp, dataPoints) {
+function updateDisplay(price, timestamp, seriesByPeriod) {
   if (typeof price === 'number') {
     priceElement.textContent = price.toFixed(2) + ' CNY/克';
   } else {
@@ -168,7 +224,7 @@ function updateDisplay(price, timestamp, dataPoints) {
   }
 
   marketStatusRenderer.render(timestamp);
-  changeBoardRenderer.render(dataPoints);
+  changeBoardRenderer.render(seriesByPeriod);
 }
 
 // 功能：负责渲染市场状态提示
@@ -204,19 +260,12 @@ const marketStatusRenderer = (() => {
 
 // 功能：负责计算与渲染涨跌幅看板
 const changeBoardRenderer = (() => {
-  const PERIOD_CONFIG = {
-    day: 24 * 60 * 60 * 1000,
-    week: 7 * 24 * 60 * 60 * 1000,
-    month: 30 * 24 * 60 * 60 * 1000
-  };
-
   // 功能：计算指定周期的涨跌幅
-  function calculateChange(dataPoints, duration) {
+  function calculateChange(dataPoints, duration, now) {
     if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
       return null;
     }
 
-    const now = Date.now();
     const startTime = now - duration;
 
     let baselinePrice = null;
@@ -266,19 +315,25 @@ const changeBoardRenderer = (() => {
   }
 
   // 功能：渲染涨跌信息
-  function render(dataPoints) {
+  function render(seriesByPeriod = {}) {
+    const now = Date.now();
+    const changeCache = {};
+
+    Object.entries(PERIOD_RANGES).forEach(([period, duration]) => {
+      const dataPoints = Array.isArray(seriesByPeriod[period]) ? seriesByPeriod[period] : [];
+      changeCache[period] = calculateChange(dataPoints, duration, now);
+    });
+
     changeValueElements.forEach((element) => {
       const period = element.getAttribute('data-period');
-      const duration = PERIOD_CONFIG[period];
-      const changeData = calculateChange(dataPoints, duration);
+      const changeData = changeCache[period];
       const { valueText } = formatChange(changeData);
       element.textContent = valueText;
     });
 
     changeExtraElements.forEach((element) => {
       const period = element.getAttribute('data-extra');
-      const duration = PERIOD_CONFIG[period];
-      const changeData = calculateChange(dataPoints, duration);
+      const changeData = changeCache[period];
       const { extraText } = formatChange(changeData);
       element.textContent = extraText;
     });
@@ -289,11 +344,11 @@ const changeBoardRenderer = (() => {
 
 // 功能：初始化页面并定时刷新
 (async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
+  const { price, timestamp, seriesByPeriod } = await fetchGoldPrice();
+  updateDisplay(price, timestamp, seriesByPeriod);
 })();
 
 setInterval(async () => {
-  const { price, timestamp, dataPoints } = await fetchGoldPrice();
-  updateDisplay(price, timestamp, dataPoints);
+  const { price, timestamp, seriesByPeriod } = await fetchGoldPrice();
+  updateDisplay(price, timestamp, seriesByPeriod);
 }, 60000);
