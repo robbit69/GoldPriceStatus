@@ -54,3 +54,11 @@ test('partial historical failure keeps old affected curve while updating success
   assert.equal(JSON.stringify(context.cachedSeriesByPeriod.day), '[[2000,940]]');
   assert.match(nodes['.history-status'].textContent, /7天曲线更新失败/);
 });
+test('initial latest failure can still show a real primary historical quote with failure notice', async () => {
+  const { context, nodes } = page();
+  await context.refreshPrimary();
+  context.fetch = async () => ({ ok: true, json: async () => payload([[Date.now() - 300000, 938.06]]) });
+  await context.refreshHistory(false);
+  assert.equal(nodes['.price'].textContent, '938.06 CNY/克');
+  assert.match(nodes['.status'].textContent, /更新失败/);
+});

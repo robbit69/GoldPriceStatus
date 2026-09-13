@@ -470,6 +470,14 @@ async function refreshHistory(animate) {
   });
   historyStatusElement.textContent = failed.length ? `${failed.join('、')}曲线更新失败，已有曲线保留` : '';
   lastHistoryRefresh = failed.length ? 0 : Date.now();
+  // 最新价请求较慢或失败时，仍可显示同一来源历史中的最后一笔真实报价。
+  for (const points of Object.values(cachedSeriesByPeriod)) {
+    const latest = points[points.length - 1];
+    if (latest && (!lastPrimary || latest[0] > lastPrimary.timestamp)) {
+      lastPrimary = { price: latest[1], timestamp: latest[0] };
+    }
+  }
+  renderPrimary();
   changeBoardRenderer.render(cachedSeriesByPeriod);
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
 }
