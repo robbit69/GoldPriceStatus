@@ -1,231 +1,189 @@
-// -----------------------
-// Cloudflare Worker 入口
-// 该 Worker 用于代理请求第三方 API
-// -----------------------
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
+// 原始行情与对照行情分开，绝不拼接不同来源的价格。
+const GOLD_VERSION = '2026-09-14.1';
+const MINUTE = 60_000;
+const DAY = 86_400_000;
+const CURRENCIES = ['cny', 'usd', 'eur', 'gbp', 'jpy', 'aud', 'cad', 'chf', 'inr'];
+const PERIODS = { day: DAY, week: 7 * DAY, month: 30 * DAY };
+const CORS = {
+  'Content-Type': 'application/json; charset=utf-8',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Gold-Version': GOLD_VERSION
+};
+const inFlight = new Map();
+addEventListener('fetch', event => event.respondWith(handleRequest(event.request, event)));
 
-/**
- * 处理请求的核心函数
- * @param {Request} request - 来自浏览器的请求对象
- * @returns {Response} - 返回给浏览器的响应对象
- */
-async function handleRequest(request) {
-  // 解析当前请求的 URL
-  const url = new URL(request.url);
+function json(body, status = 200, head = false) {
+  return new Response(head ? null : JSON.stringify(body), { status, headers: CORS });
+}
 
-  // 路由判断：根据 pathname 判断要执行什么逻辑
-  if (url.pathname === '/price') {
-    // 如果是访问 '/price' 路径，则执行代理请求逻辑
-    // 从查询参数中获取配置
-    const currency = url.searchParams.get('currency') || 'cny'; // 默认人民币
-    const unit = url.searchParams.get('unit') || 'grams'; // 默认克
-    
-    // 获取时间范围参数
-    const now = Date.now();
-    const defaultStartTime = now - 10 * 60 * 1000; // 默认往前十分钟
-    
-    const starttime = parseInt(url.searchParams.get('starttime')) || defaultStartTime;
-    const endtime = parseInt(url.searchParams.get('endtime')) || now;
-    
-    // 获取 debug 参数
-    const debug = url.searchParams.get('debug') === 'true';
-    
-    return await fetchGoldPriceProxy(currency, unit, starttime, endtime, debug);
-  } else {
-    // 如果路径不是 '/price'，返回 404
-    return new Response('Not found', { status: 404 });
+function timestamp(params, name, fallback) {
+  if (!params.has(name)) return fallback;
+  const raw = params.get(name);
+  const value = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} 必须是有效的毫秒时间戳`);
+  }
+  return value;
+}
+
+function parseQuery(url, now) {
+  const p = url.searchParams;
+  const currency = (p.get('currency') || 'cny').toLowerCase();
+  const unit = (p.get('unit') || 'grams').toLowerCase();
+  if (!CURRENCIES.includes(currency)) throw new Error('不支持的货币单位');
+  if (!['grams', 'ounces', 'kilos'].includes(unit)) throw new Error('不支持的重量单位');
+  const period = p.get('period');
+  const explicit = p.has('starttime') || p.has('endtime');
+  if (period !== null && (!Object.hasOwn(PERIODS, period) || explicit)) {
+    throw new Error('period 必须为 day、week 或 month，且不能与时间范围混用');
+  }
+  if (url.pathname === '/compare' && (explicit || period !== null)) throw new Error('对照接口仅提供最新价');
+  const boundary = Math.floor(now / MINUTE) * MINUTE;
+  const endtime = timestamp(p, 'endtime', explicit ? now : boundary);
+  const starttime = timestamp(p, 'starttime', endtime - (period ? PERIODS[period] : 10 * MINUTE));
+  if (starttime >= endtime || endtime > now + MINUTE || endtime - starttime > 366 * DAY) {
+    throw new Error('时间范围须递增、不得超过 366 天或超出当前时间');
+  }
+  return { currency, unit, starttime, endtime, latest: !explicit && period === null, period };
+}
+
+async function upstreamJSON(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (Compatible; Cloudflare Worker)' }
+    });
+    if (!response.ok) throw new Error(`上游 HTTP ${response.status}`);
+    if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+      throw new Error('上游返回非 JSON 数据');
+    }
+    if (Number(response.headers.get('content-length')) > 4_000_000) throw new Error('上游响应过大');
+    const body = await response.text();
+    if (body.length > 4_000_000) throw new Error('上游响应过大');
+    return JSON.parse(body);
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('上游请求超时');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+function validateSeries(data, currency, starttime, endtime) {
+  const series = data?.chartData?.[currency.toUpperCase()];
+  if (!Array.isArray(series)) throw new Error('上游行情结构异常');
+  const unique = new Map();
+  for (const point of series) {
+    if (!Array.isArray(point) || !Number.isSafeInteger(point[0]) || point[0] <= 0 ||
+        !Number.isFinite(point[1]) || point[1] <= 0) throw new Error('上游价格点无效');
+    if (point[0] >= starttime && point[0] <= endtime) unique.set(point[0], point[1]);
+  }
+  return [...unique].sort((a, b) => a[0] - b[0]);
+}
+
+async function primaryQuote(q) {
+  let { starttime, endtime } = q;
+  const fetchSeries = async () => validateSeries(await upstreamJSON(
+    `https://fsapi.gold.org/api/goldprice/v11/chart/price/${q.currency}/${q.unit}/${starttime},${endtime}`
+  ), q.currency, starttime, endtime);
+  let series = await fetchSeries();
+  let fallbackUsed = false;
+  // 仅默认最新价可扩展到七天，覆盖周末/长假；历史查询绝不改时间。
+  if (!series.length && q.latest) {
+    starttime = endtime - 7 * DAY;
+    series = await fetchSeries();
+    fallbackUsed = true;
+  }
+  return {
+    source: 'World Gold Council', currency: q.currency.toUpperCase(), unit: q.unit,
+    chartData: { [q.currency.toUpperCase()]: series }, starttime, endtime,
+    dataTimestamp: series.length ? series[series.length - 1][0] : null, fallbackUsed
+  };
+}
+
+async function comparisonQuote(q) {
+  const data = await upstreamJSON(`https://api.gold-api.com/price/XAU/${q.currency.toUpperCase()}`);
+  const time = Date.parse(data.updatedAt);
+  if (data.symbol !== 'XAU' || data.currency !== q.currency.toUpperCase() ||
+      !Number.isFinite(data.price) || data.price <= 0 || !Number.isFinite(time) || time <= 0 ||
+      time > Date.now() + MINUTE) throw new Error('对照行情结构异常');
+  const price = q.unit === 'ounces' ? data.price : data.price / 31.1034768 * (q.unit === 'kilos' ? 1000 : 1);
+  return {
+    source: 'gold-api.com', currency: q.currency.toUpperCase(), unit: q.unit,
+    price, dataTimestamp: time, sourceUnit: 'troy_ounce', comparisonOnly: true
+  };
+}
+
+async function cachedQuote(key, ttl, loader, event) {
+  const cache = typeof caches !== 'undefined' ? caches.default : null;
+  let previous = null;
+  try {
+    const stored = cache && await cache.match(key);
+    if (stored) previous = await stored.json();
+  } catch (_) { /* 缓存不可用时仍请求上游。 */ }
+  if (previous && Date.now() - previous.cachedAt < ttl) {
+    return { ...previous.data, fetchedAt: previous.cachedAt, cached: true, updateFailed: false };
+  }
+  try {
+    if (!inFlight.has(key)) {
+      const task = (async () => {
+        const data = await loader();
+        const cachedAt = Date.now();
+        if (cache) {
+          const write = cache.put(key, new Response(JSON.stringify({ data, cachedAt }), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' }
+          })).catch(() => {});
+          if (event?.waitUntil) event.waitUntil(write);
+          else await write;
+        }
+        return { ...data, fetchedAt: cachedAt, cached: false, updateFailed: false };
+      })();
+      inFlight.set(key, task);
+      task.then(() => inFlight.delete(key), () => inFlight.delete(key));
+    }
+    return await inFlight.get(key);
+  } catch (error) {
+    if (previous && Date.now() - previous.cachedAt <= DAY) {
+      return { ...previous.data, fetchedAt: previous.cachedAt, cached: true, updateFailed: true };
+    }
+    throw error;
   }
 }
 
-/**
- * 代理请求函数：请求第三方金价接口并返回
- * 
- * @param {string} currency - 货币单位，如 'cny'(人民币) 或 'usd'(美元)
- * @param {string} unit - 重量单位，如 'grams'(克) 或 'ounces'(盎司)
- * @param {number} starttime - 开始时间戳（毫秒）
- * @param {number} endtime - 结束时间戳（毫秒）
- * @param {boolean} debug - 是否开启调试模式
- * @returns {Response} - 返回给浏览器的响应对象
- * 
- * 主要功能：
- * 1. 验证参数
- * 2. 构建目标URL请求金价数据
- * 3. 发送请求并处理可能的错误
- * 4. 设置CORS头信息允许跨域访问
- */
-async function fetchGoldPriceProxy(currency = 'cny', unit = 'grams', starttime, endtime, debug = false) {
-  // 创建调试信息对象
-  const debugInfo = {
-    request_time: new Date().toISOString().replace('T', ' ').substr(0, 19),
-    time_start: new Date().toISOString().replace('T', ' ').substr(0, 19),
-    params: {
-      currency,
-      unit,
-      starttime,
-      endtime,
-      debug
-    }
-  };
-  
-  // 将货币单位转为小写
-  currency = currency.toLowerCase();
-  // 将重量单位转为小写
-  unit = unit.toLowerCase();
-  
-  // 验证参数
-  if (!['cny', 'usd', 'eur', 'gbp', 'jpy', 'aud', 'cad', 'chf', 'inr'].includes(currency)) {
-    return new Response('不支持的货币单位', { 
-      status: 400,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
-  
-  if (!['grams', 'ounces', 'kilos'].includes(unit)) {
-    return new Response('不支持的重量单位', { 
-      status: 400,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
-  
-  // 验证时间戳参数
-  if (isNaN(starttime) || isNaN(endtime) || starttime >= endtime) {
-    return new Response('无效的时间范围参数', { 
-      status: 400,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  }
-  
-  // 构建目标URL，根据参数请求相应的金价数据
-  let targetUrl = `https://fsapi.gold.org/api/goldprice/v11/chart/price/${currency}/${unit}/${starttime},${endtime}`;
-  
-  // 记录API请求信息
-  debugInfo.APIserverHostname = 'fsapi.gold.org';
-  debugInfo.protocol = 'https';
-  debugInfo.uri = targetUrl;
-  debugInfo.route = 'fsapi.gold.org';
-  debugInfo.cached = false;
-
-  const startTime = new Date();
-  let fetchResponse;
+async function handleRequest(request, event) {
+  const url = new URL(request.url);
+  const head = request.method === 'HEAD';
+  if (!['/price', '/compare'].includes(url.pathname)) return json({ error: 'Not found' }, 404, head);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (!['GET', 'HEAD'].includes(request.method)) return new Response(JSON.stringify({ error: '仅支持 GET、HEAD、OPTIONS' }), {
+    status: 405, headers: { ...CORS, Allow: 'GET, HEAD, OPTIONS' }
+  });
+  let q;
+  try { q = parseQuery(url, Date.now()); }
+  catch (error) { return json({ error: error.message }, 400, head); }
+  const started = Date.now();
+  const comparison = url.pathname === '/compare';
+  const rangeKey = comparison || q.latest ? 'latest' : q.period || `${q.starttime}-${q.endtime}`;
+  const key = `${url.origin}/__gold_cache/${GOLD_VERSION}${url.pathname}/${q.currency}/${q.unit}/${rangeKey}`;
   try {
-    // 尝试发送请求到目标API
-    // 设置User-Agent头以标识请求来自Cloudflare Worker
-    fetchResponse = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Compatible; Cloudflare Worker)'
-      }
-    });
-    
-    // 解析响应数据
-    const responseData = await fetchResponse.json();
-    
-    // 记录请求完成时间
-    const endTime = new Date();
-    debugInfo.time_stop = endTime.toISOString().replace('T', ' ').substr(0, 19);
-    debugInfo.time = `${(endTime - startTime) / 1000} secs`;
-    
-    // 处理响应数据
-    let resultData = responseData;
-    let usedStarttime = starttime;
-    let usedEndtime = endtime;
-    
-    // 检查是否有数据
-    if (!responseData.chartData || 
-        !responseData.chartData[currency.toUpperCase()] || 
-        responseData.chartData[currency.toUpperCase()].length === 0) {
-      
-      // 如果没有价格数据，说明可能是黄金停盘或时间范围不合适
-      // 重新调整时间再次请求，获取最近48小时的数据
-      const now = new Date();
-      usedEndtime = now.getTime();
-      usedStarttime = usedEndtime - 48 * 60 * 60 * 1000;
-      
-      // 重新构建URL并发送请求
-      const newTargetUrl = `https://fsapi.gold.org/api/goldprice/v11/chart/price/${currency}/${unit}/${usedStarttime},${usedEndtime}`;
-      debugInfo.retryUri = newTargetUrl;
-      
-      const retryResponse = await fetch(newTargetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Compatible; Cloudflare Worker)'
-        }
-      });
-      
-      // 解析新的响应数据
-      resultData = await retryResponse.json();
-    }
-    
-    // 构建完整的响应对象
-    const responseObj = {
-      chartData: resultData.chartData,
-      currency: currency.toUpperCase(),
-      unit: unit,
-      starttime: usedStarttime,
-      endtime: usedEndtime,
-      requestTime: new Date().toISOString()
+    const data = await cachedQuote(key, comparison || q.latest ? MINUTE : 5 * MINUTE,
+      () => comparison ? comparisonQuote(q) : primaryQuote(q), event);
+    const ageSeconds = data.dataTimestamp ? Math.max(0, Math.floor((Date.now() - data.dataTimestamp) / 1000)) : null;
+    const result = {
+      ...data, requestTime: new Date().toISOString(), ageSeconds,
+      stale: data.updateFailed || ageSeconds === null || ageSeconds > 2 * 3600
     };
-    
-    // 如果开启了调试模式，添加调试信息
-    if (debug) {
-      // 更新响应大小信息
-      const responseJson = JSON.stringify(responseObj);
-      debugInfo.response_size = responseJson.length;
-      debugInfo.size = `${(responseJson.length / 1024).toFixed(2)} KB`;
-      
-      // 添加调试信息到响应对象
-      responseObj.system = debugInfo;
+    if (url.searchParams.get('debug') === 'true') {
+      result.system = { version: GOLD_VERSION, cached: data.cached, elapsedMs: Date.now() - started };
     }
-    
-    return new Response(JSON.stringify(responseObj), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-        'Access-Control-Allow-Headers': '*'
-      }
-    });
-    
-  } catch (err) {
-    // 如果开启了调试模式，添加错误信息到调试对象
-    if (debug) {
-      debugInfo.error = err.message;
-      debugInfo.error_stack = err.stack;
-      
-      const endTime = new Date();
-      debugInfo.time_stop = endTime.toISOString().replace('T', ' ').substr(0, 19);
-      debugInfo.time = `${(endTime - startTime) / 1000} secs`;
-      
-      // 返回带有调试信息的错误响应
-      return new Response(JSON.stringify({
-        error: '获取金价数据失败',
-        message: err.message,
-        system: debugInfo
-      }), { 
-        status: 502,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
-    
-    // 如果请求失败，返回502错误（Bad Gateway）
-    return new Response('获取金价数据失败: ' + err.message, { 
-      status: 502,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
+    return json(result, 200, head);
+  } catch (error) {
+    console.error('gold_upstream_error', { source: comparison ? 'gold-api.com' : 'gold.org', message: error.message });
+    return json({ error: '获取金价数据失败', source: comparison ? 'gold-api.com' : 'World Gold Council', updateFailed: true }, 502, head);
   }
 }

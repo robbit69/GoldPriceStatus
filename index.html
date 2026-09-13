@@ -82,6 +82,15 @@
     .status.active {
       color: #27ae60;
     }
+    .source-note, .comparison, .history-status {
+      color: #716747;
+      font-size: clamp(11px, 1.15vw, 16px);
+      line-height: 1.5;
+      max-width: 100%;
+    }
+    .quote-notes { display: grid; gap: 4px; }
+    .comparison { font-variant-numeric: tabular-nums; }
+    .history-status:empty { display: none; }
     .change-board {
       width: 100%;
       display: grid;
@@ -229,6 +238,11 @@
     <div class="price">加载中...</div>
     <div class="time"></div>
     <div class="status" aria-live="polite">状态加载中...</div>
+    <div class="quote-notes">
+      <div class="source-note">主报价与曲线：世界黄金协会 · 人民币/克参考价</div>
+      <div class="comparison" aria-live="polite">独立对照价加载中...</div>
+      <div class="history-status" aria-live="polite"></div>
+    </div>
     <div class="change-board" aria-live="polite">
       <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
         <span class="indicator" aria-hidden="true"></span>
@@ -252,6 +266,7 @@
   </div>
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
-  <script src="script.js"></script>
+  <script src="price-model.js?v=20260914"></script>
+  <script src="script.js?v=20260914"></script>
 </body>
 </html> 
