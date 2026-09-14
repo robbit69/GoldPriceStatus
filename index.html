@@ -91,6 +91,19 @@
     .quote-notes { display: grid; gap: 4px; }
     .comparison { font-variant-numeric: tabular-nums; }
     .history-status:empty { display: none; }
+    .range-summary {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.3em 1.1em;
+      color: #887a53;
+      font-size: clamp(12px, 1.05vw, 16px);
+      line-height: 1.6;
+      font-variant-numeric: tabular-nums;
+      margin-top: -0.3em;
+    }
+    .range-summary span { white-space: nowrap; }
+    .range-period, .range-unit { color: #948b71; }
     .change-board {
       width: 100%;
       display: grid;
@@ -263,10 +276,16 @@
         <div class="change-extra" data-extra="month">—</div>
       </div>
     </div>
+    <div class="range-summary" aria-live="polite" aria-atomic="true" title="当前曲线中已获取报价点的最高价和最低价">
+      <span class="range-period">当前 24H</span>
+      <span class="range-high">最高 —</span>
+      <span class="range-low">最低 —</span>
+      <span class="range-unit">元/克</span>
+    </div>
   </div>
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
   <script src="price-model.js?v=20260914"></script>
-  <script src="script.js?v=20260914"></script>
+  <script src="script.js?v=20260914-range"></script>
 </body>
 </html> 

@@ -57,6 +57,7 @@ function setSelectedPeriod(period) {
   }
   selectedPeriod = period;
   updateCardSelectionUI();
+  renderRangeSummary();
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, true);
 }
 
@@ -449,6 +450,21 @@ async function refreshComparison() {
   comparisonElement.textContent = `独立对照：${lastComparison.price.toFixed(2)} CNY/克 · gold-api.com ${label} · ${time}`;
 }
 
+function renderRangeSummary() {
+  const points = cachedSeriesByPeriod[selectedPeriod] || [];
+  let high = -Infinity;
+  let low = Infinity;
+  for (const point of points) {
+    if (Array.isArray(point) && Number.isFinite(point[1]) && point[1] > 0) {
+      high = Math.max(high, point[1]);
+      low = Math.min(low, point[1]);
+    }
+  }
+  document.querySelector('.range-period').textContent = `当前 ${{ day: '24H', week: '7天', month: '30天' }[selectedPeriod]}`;
+  document.querySelector('.range-high').textContent = `最高 ${Number.isFinite(high) ? high.toFixed(2) : '—'}`;
+  document.querySelector('.range-low').textContent = `最低 ${Number.isFinite(low) ? low.toFixed(2) : '—'}`;
+}
+
 async function refreshHistory(animate) {
   const periods = Object.keys(PERIOD_RANGES);
   const results = await Promise.allSettled(periods.map(async period => {
@@ -479,6 +495,7 @@ async function refreshHistory(animate) {
   }
   renderPrimary();
   changeBoardRenderer.render(cachedSeriesByPeriod);
+  renderRangeSummary();
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
 }
 
