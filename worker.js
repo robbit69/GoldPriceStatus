@@ -1,5 +1,5 @@
 // 原始行情与对照行情分开，绝不拼接不同来源的价格。
-const GOLD_VERSION = '2026-09-14.1';
+const GOLD_VERSION = '2026-09-14.2';
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 const CURRENCIES = ['cny', 'usd', 'eur', 'gbp', 'jpy', 'aud', 'cad', 'chf', 'inr'];
@@ -67,7 +67,8 @@ async function upstreamJSON(url) {
     if (Number(response.headers.get('content-length')) > 4_000_000) throw new Error('上游响应过大');
     const body = await response.text();
     if (body.length > 4_000_000) throw new Error('上游响应过大');
-    return JSON.parse(body);
+    try { return JSON.parse(body); }
+    catch (_) { throw new Error('上游 JSON 格式无效'); }
   } catch (error) {
     if (controller.signal.aborted) throw new Error('上游请求超时');
     throw error;
@@ -76,6 +77,10 @@ async function upstreamJSON(url) {
 
 function validateSeries(data, currency, starttime, endtime) {
   const series = data?.chartData?.[currency.toUpperCase()];
+  // WGC 在无报价区间返回 {chartData: {asOfDate: 'YYYY-MM-DD'}}。
+  // 仅识别已验证的空行情结构；错误对象/缺失 chartData 仍视为上游异常。
+  if (data?.chartData && Object.keys(data.chartData).length === 1 &&
+      typeof data.chartData.asOfDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.chartData.asOfDate)) return [];
   if (!Array.isArray(series)) throw new Error('上游行情结构异常');
   const unique = new Map();
   for (const point of series) {
@@ -149,7 +154,7 @@ async function cachedQuote(key, ttl, loader, event) {
     return await inFlight.get(key);
   } catch (error) {
     if (previous && Date.now() - previous.cachedAt <= DAY) {
-      return { ...previous.data, fetchedAt: previous.cachedAt, cached: true, updateFailed: true };
+      return { ...previous.data, fetchedAt: previous.cachedAt, cached: true, updateFailed: true, failureReason: error.message };
     }
     throw error;
   }
@@ -174,16 +179,18 @@ async function handleRequest(request, event) {
     const data = await cachedQuote(key, comparison || q.latest ? MINUTE : 5 * MINUTE,
       () => comparison ? comparisonQuote(q) : primaryQuote(q), event);
     const ageSeconds = data.dataTimestamp ? Math.max(0, Math.floor((Date.now() - data.dataTimestamp) / 1000)) : null;
+    const { failureReason, ...publicData } = data;
     const result = {
-      ...data, requestTime: new Date().toISOString(), ageSeconds,
+      ...publicData, requestTime: new Date().toISOString(), ageSeconds,
       stale: data.updateFailed || ageSeconds === null || ageSeconds > 2 * 3600
     };
     if (url.searchParams.get('debug') === 'true') {
-      result.system = { version: GOLD_VERSION, cached: data.cached, elapsedMs: Date.now() - started };
+      result.system = { version: GOLD_VERSION, cached: data.cached, elapsedMs: Date.now() - started, error: failureReason };
     }
     return json(result, 200, head);
   } catch (error) {
     console.error('gold_upstream_error', { source: comparison ? 'gold-api.com' : 'gold.org', message: error.message });
-    return json({ error: '获取金价数据失败', source: comparison ? 'gold-api.com' : 'World Gold Council', updateFailed: true }, 502, head);
+    return json({ error: '获取金价数据失败', source: comparison ? 'gold-api.com' : 'World Gold Council', updateFailed: true,
+      ...(url.searchParams.get('debug') === 'true' ? { system: { version: GOLD_VERSION, error: error.message } } : {}) }, 502, head);
   }
 }

@@ -68,6 +68,19 @@ test('fallback validates HTTP status and returns 502, not success', async () => 
   const w = worker((url, init, count) => count === 1 ? response({ chartData: { CNY: [] } }) : new Response('bad', { status: 503 }));
   assert.equal((await w.request()).status, 502);
 });
+test('WGC date-only empty response permits latest fallback and preserves empty historical range', async () => {
+  const w = worker((url, init, count, now) => count === 1 ? response({ chartData: { asOfDate: '2026-09-11' } }) : price(now));
+  const latest = await (await w.request()).json();
+  assert.equal(latest.fallbackUsed, true);
+  assert.equal(latest.updateFailed, false);
+  assert.equal(w.calls.length, 2);
+  const historical = worker(() => response({ chartData: { asOfDate: '2026-09-11' } }));
+  const data = await (await historical.request('/price?starttime=100000&endtime=200000')).json();
+  assert.deepEqual(data.chartData.CNY, []);
+  assert.equal(historical.calls.length, 1);
+  const bad = worker(() => response({ error: 'provider error' }));
+  assert.equal((await bad.request()).status, 502);
+});
 test('malformed, null and non-positive points cannot become valid prices', async () => {
   for (const value of [null, 0, -1, '938']) {
     const w = worker((url, init, count, now) => response({ chartData: { CNY: [[now - 300000, value]] } }));
