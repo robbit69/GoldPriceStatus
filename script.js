@@ -57,11 +57,7 @@ const layoutController = (() => {
   function setAppHeight() {
     const height = window.visualViewport?.height || window.innerHeight;
     document.documentElement.style.setProperty('--app-height', `${height}px`);
-    const content = document.querySelector('.container');
-    const safe = readSafeAreaInsets();
-    const scale = Math.min(1, Math.max(1, height - safe.top - safe.bottom - 170) / content.offsetHeight,
-      (window.innerWidth - safe.left - safe.right - 20) / content.scrollWidth);
-    content.style.transform = `translateY(-10px) scale(${scale})`;
+
   }
 
   // 功能：禁用浏览器滚轮与触摸滚动

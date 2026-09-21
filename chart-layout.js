@@ -4,8 +4,8 @@
   const layout = {
     lanes(height, safe, content) {
       return {
-        high: Math.max(safe.top + 38, content.top - 30),
-        low: Math.min(height - safe.bottom - 58, content.bottom + 54)
+        high: Math.max(safe.top + 30, content.top - 16),
+        low: Math.min(height - safe.bottom - 12, content.bottom + 34)
       };
     },
     label(anchor, textWidth, width, safe) {

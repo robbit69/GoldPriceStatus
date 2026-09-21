@@ -234,6 +234,32 @@
       .change-card .change-value { font-size: 5vw; }
       .change-card .change-extra { font-size: 2.9vw; }
     }
+    @media (orientation: landscape) and (max-height: 500px) {
+      .container { width: 94%; gap: 5px; }
+      .price { font-size: min(8.5vw, calc(var(--app-height) * .17)); line-height: 1.05; }
+      .time { font-size: 15px; line-height: 1.2; }
+      .status { font-size: 18px; line-height: 1.2; }
+      .change-board { gap: 10px; margin-top: 7px; }
+      .change-card { padding: 8px 10px; gap: 3px; border-radius: 10px; }
+      .change-card .period { font-size: 18px; }
+      .change-card .change-value { font-size: 28px; line-height: 1.05; }
+      .change-card .change-line:last-child { font-size: 19px; }
+      .change-card .change-extra { font-size: 13px; }
+      .change-card .change-lines { flex-direction: row; align-items: baseline; gap: 8px; }
+      .history-status { font-size: 11px; }
+      #fullscreenButton { left: auto; right: calc(var(--safe-right) + 12px); bottom: calc(var(--safe-bottom) + 5px); transform: none; padding: 4px 12px; }
+    }
+    @media (orientation: landscape) and (max-height: 320px) {
+      .price { font-size: min(8.5vw, calc(var(--app-height) * .16)); }
+      .time { font-size: 13px; }
+      .status { font-size: 16px; }
+      .change-card { padding: 6px 8px; }
+      .change-card .period { font-size: 16px; }
+      .change-card .change-value { font-size: 26px; }
+      .change-card .change-line:last-child { font-size: 17px; }
+    }
+    .fullscreen .change-card { background: rgba(28, 26, 20, .72); box-shadow: inset 0 0 0 1px rgba(212,175,55,.18); }
+    .fullscreen .change-card.active { box-shadow: inset 0 0 0 1px rgba(212,175,55,.55); }
   </style>
 </head>
 <body>
@@ -269,7 +295,7 @@
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
   <script src="price-model.js?v=20260914"></script>
-  <script src="chart-layout.js?v=20260921"></script>
-  <script src="script.js?v=20260921-layout"></script>
+  <script src="chart-layout.js?v=20260921-display2"></script>
+  <script src="script.js?v=20260921-display2"></script>
 </body>
 </html> 
