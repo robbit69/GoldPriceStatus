@@ -330,7 +330,8 @@ const chartRenderer = (() => {
         const point = cachedSeries.find(([, price]) => price === value);
         const text = `${name} ${value.toFixed(2)} 元`;
         const anchor = { x: toX(point[0]), y: toY(value) };
-        const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea);
+        const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea,
+          [fullscreenButton.getBoundingClientRect()], fontSize);
         backgroundCtx.strokeStyle = '#e35b60';
         backgroundCtx.fillStyle = '#e35b60';
         backgroundCtx.lineWidth = 1.5;
