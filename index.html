@@ -82,28 +82,8 @@
     .status.active {
       color: #27ae60;
     }
-    .source-note, .comparison, .history-status {
-      color: #716747;
-      font-size: clamp(11px, 1.15vw, 16px);
-      line-height: 1.5;
-      max-width: 100%;
-    }
-    .quote-notes { display: grid; gap: 4px; }
-    .comparison { font-variant-numeric: tabular-nums; }
+    .history-status { color: #a36b38; font-size: 12px; line-height: 1.3; }
     .history-status:empty { display: none; }
-    .range-summary {
-      display: flex;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 0.3em 1.1em;
-      color: #887a53;
-      font-size: clamp(12px, 1.05vw, 16px);
-      line-height: 1.6;
-      font-variant-numeric: tabular-nums;
-      margin-top: -0.3em;
-    }
-    .range-summary span { white-space: nowrap; }
-    .range-period, .range-unit { color: #948b71; }
     .change-board {
       width: 100%;
       display: grid;
@@ -201,24 +181,6 @@
       --change-up-color: #ff6b6b;
       --change-down-color: #3ddc97;
     }
-    /* 全屏时的价格字体更大 */
-    .fullscreen .price {
-      font-size: 10vw;
-    }
-    @media (max-width: 600px) {
-      .price { font-size: 8vw; }
-      .time { font-size: 4vw; }
-      .status { font-size: 5vw; }
-      .change-card .period { font-size: 4.2vw; }
-      .change-card .change-value { font-size: 5vw; }
-      .change-card .change-arrow { font-size: 6vw; }
-      .change-card .change-line:first-child { font-size: 5vw; }
-      .change-card .change-line:last-child { font-size: 4.2vw; }
-      .change-card .change-extra { font-size: 3.4vw; }
-      .fullscreen .price {
-        font-size: 15vw;
-      }
-    }
     /* 全屏按钮样式，居中显示，轻拟物风格 */
     #fullscreenButton {
       position: fixed;
@@ -243,19 +205,45 @@
       box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.2),
                   inset -4px -4px 8px rgba(255, 255, 255, 0.7);
     }
+    /* Width and height both constrain the display, including XS landscape. */
+    body { padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); box-sizing: border-box; }
+    #backgroundChart { height: var(--app-height); opacity: 1; }
+    .container { width: 84%; height: auto; padding: 0; gap: clamp(8px, 2vh, 24px); }
+    .price { margin: 0; font-size: min(5.5vw, 12vh); line-height: 1.12; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .time { margin: 0; font-size: min(2.1vw, 4.5vh); line-height: 1.3; white-space: nowrap; }
+    .status { font-size: min(2.5vw, 5vh); line-height: 1.3; text-align: center; }
+    .change-board { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(6px, 1vw, 16px); margin-top: 0; }
+    .change-card { min-width: 0; padding: min(1vw, 1.6vh); gap: min(.6vw, 1vh); box-sizing: border-box; }
+    .change-card .period { font-size: min(2vw, 4.5vh); white-space: nowrap; }
+    .change-card .change-value { line-height: 1.15; gap: .25em; padding: 0; font-size: min(2.8vw, 5vh); }
+    .change-card .change-arrow { font-size: .8em; min-width: 0; }
+    .change-card .change-lines { gap: 0; }
+    .change-card .change-line:first-child { font-size: 1em; white-space: nowrap; }
+    .change-card .change-line:last-child { font-size: .8em; }
+    .change-card .change-extra { font-size: min(1.6vw, 3.5vh); white-space: nowrap; }
+    .change-card .indicator { width: 6px; height: 6px; top: 7px; right: 7px; }
+    #fullscreenButton { bottom: calc(var(--safe-bottom) + 12px); padding: 7px 20px; font-size: 13px; }
+    .chart-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    @media (max-width: 600px) and (orientation: portrait) {
+      .container { width: 94%; gap: 18px; }
+      .price { font-size: 8vw; }
+      .time { font-size: 3.6vw; }
+      .status { font-size: 4.6vw; }
+      .change-card { padding: 14px 4px 10px; gap: 8px; }
+      .change-card .period { font-size: 3.6vw; }
+      .change-card .change-value { font-size: 5vw; }
+      .change-card .change-extra { font-size: 2.9vw; }
+    }
   </style>
 </head>
 <body>
   <canvas id="backgroundChart" aria-hidden="true"></canvas>
+  <div class="chart-description" aria-live="polite"></div>
   <div class="container">
     <div class="price">加载中...</div>
     <div class="time"></div>
     <div class="status" aria-live="polite">状态加载中...</div>
-    <div class="quote-notes">
-      <div class="source-note">主报价与曲线：世界黄金协会 · 人民币/克参考价</div>
-      <div class="comparison" aria-live="polite">独立对照价加载中...</div>
-      <div class="history-status" aria-live="polite"></div>
-    </div>
+    <div class="history-status" aria-live="polite"></div>
     <div class="change-board" aria-live="polite">
       <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
         <span class="indicator" aria-hidden="true"></span>
@@ -276,16 +264,12 @@
         <div class="change-extra" data-extra="month">—</div>
       </div>
     </div>
-    <div class="range-summary" aria-live="polite" aria-atomic="true" title="当前曲线中已获取报价点的最高价和最低价">
-      <span class="range-period">当前 24H</span>
-      <span class="range-high">最高 —</span>
-      <span class="range-low">最低 —</span>
-      <span class="range-unit">元/克</span>
-    </div>
+
   </div>
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
   <script src="price-model.js?v=20260914"></script>
-  <script src="script.js?v=20260914-range"></script>
+  <script src="chart-layout.js?v=20260921"></script>
+  <script src="script.js?v=20260921-layout"></script>
 </body>
 </html> 

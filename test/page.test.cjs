@@ -32,16 +32,6 @@ test('frontend retains real primary price and timestamp when refresh fails', asy
   assert.equal(nodes['.time'].textContent, time);
   assert.match(nodes['.status'].textContent, /更新失败.*保留/);
 });
-test('comparison failure leaves primary status and chart untouched', async () => {
-  const { context, nodes } = page();
-  context.fetch = async () => ({ ok: true, json: async () => payload([[Date.now() - 300000, 938]]) });
-  await context.refreshPrimary();
-  const before = nodes['.status'].textContent;
-  context.fetch = async () => { throw Error('offline'); };
-  await context.refreshComparison();
-  assert.equal(nodes['.status'].textContent, before);
-  assert.match(nodes['.comparison'].textContent, /不影响主报价/);
-});
 test('partial historical failure keeps old affected curve while updating successful periods', async () => {
   const { context, nodes } = page();
   context.cachedSeriesByPeriod.week = [[1000, 930]];

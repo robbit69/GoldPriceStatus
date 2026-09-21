@@ -13,18 +13,9 @@ let selectedPeriod = 'day';
 
 
 function readSafeAreaInsets() {
-  const rootStyle = getComputedStyle(document.documentElement);
-  const parseInset = (propertyName) => {
-    const value = rootStyle.getPropertyValue(propertyName);
-    return Number.parseFloat(value) || 0;
-  };
-
-  return {
-    top: parseInset('--safe-top'),
-    right: parseInset('--safe-right'),
-    bottom: parseInset('--safe-bottom'),
-    left: parseInset('--safe-left')
-  };
+  const style = getComputedStyle(document.body);
+  return Object.fromEntries(['top', 'right', 'bottom', 'left'].map(side =>
+    [side, parseFloat(style.getPropertyValue(`padding-${side}`)) || 0]));
 }
 
 const PERIOD_RANGES = {
@@ -57,7 +48,6 @@ function setSelectedPeriod(period) {
   }
   selectedPeriod = period;
   updateCardSelectionUI();
-  renderRangeSummary();
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, true);
 }
 
@@ -65,7 +55,13 @@ function setSelectedPeriod(period) {
 const layoutController = (() => {
   // 功能：在不同视口尺寸下同步 CSS 变量高度
   function setAppHeight() {
-    document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    const height = window.visualViewport?.height || window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', `${height}px`);
+    const content = document.querySelector('.container');
+    const safe = readSafeAreaInsets();
+    const scale = Math.min(1, Math.max(1, height - safe.top - safe.bottom - 170) / content.offsetHeight,
+      (window.innerWidth - safe.left - safe.right - 20) / content.scrollWidth);
+    content.style.transform = `translateY(-10px) scale(${scale})`;
   }
 
   // 功能：禁用浏览器滚轮与触摸滚动
@@ -79,6 +75,7 @@ const layoutController = (() => {
 
   setAppHeight();
   disableManualScroll();
+  window.visualViewport?.addEventListener('resize', setAppHeight);
   window.addEventListener('resize', setAppHeight);
   window.addEventListener('orientationchange', setAppHeight);
 
@@ -116,7 +113,7 @@ const fullscreenController = (() => {
       await document.documentElement.requestFullscreen();
       handleEnterFullscreen();
     } catch (error) {
-      console.error('进入全屏失败：', error);
+      handleEnterFullscreen();
     }
   }
 
@@ -127,6 +124,7 @@ const fullscreenController = (() => {
       return;
     }
     if (!document.fullscreenElement) {
+      handleExitFullscreen();
       return;
     }
     try {
@@ -234,6 +232,8 @@ const chartRenderer = (() => {
 
     const { width, height } = dimensions;
     backgroundCtx.clearRect(0, 0, width, height);
+    backgroundCtx.globalAlpha = 0.6;
+    document.querySelector('.chart-description').textContent = '';
 
     if (!Array.isArray(cachedSeries) || cachedSeries.length === 0) {
       return;
@@ -253,17 +253,20 @@ const chartRenderer = (() => {
     const timeRange = maxTime - minTime || 1;
     const priceRange = maxPrice - minPrice || 1;
 
-    const chartHeight = availableHeight * 0.7;
-    const verticalOffset = safeArea.top + (availableHeight - chartHeight) / 2;
+    // Keep both extrema in clear lanes outside the central content.
+    const content = document.querySelector('.container').getBoundingClientRect();
+    const lanes = GoldChartLayout.lanes(height, safeArea, content);
+    const verticalOffset = lanes.high;
+    const chartHeight = lanes.low - lanes.high;
 
     const toX = (timestamp) => {
       const ratio = (timestamp - minTime) / timeRange;
-      const x = ratio * width;
+      const x = safeArea.left + 12 + ratio * (width - safeArea.left - safeArea.right - 24);
       return Math.min(width, Math.max(0, x));
     };
     const toY = (price) => {
       const normalized = (price - minPrice) / priceRange;
-      return verticalOffset + chartHeight - normalized * chartHeight;
+      return minPrice === maxPrice ? verticalOffset : verticalOffset + chartHeight - normalized * chartHeight;
     };
 
     const visibleSeries = interpolateSeries(progress);
@@ -280,6 +283,7 @@ const chartRenderer = (() => {
       backgroundCtx.arc(x, y, 3, 0, Math.PI * 2);
       backgroundCtx.fillStyle = 'rgba(236, 198, 76, 0.95)';
       backgroundCtx.fill();
+      if (progress === 1) drawLabels();
       return;
     }
 
@@ -318,6 +322,32 @@ const chartRenderer = (() => {
     backgroundCtx.closePath();
     backgroundCtx.fillStyle = gradient;
     backgroundCtx.fill();
+    if (progress === 1) drawLabels();
+
+    function drawLabels() {
+      backgroundCtx.globalAlpha = 1;
+      const fontSize = Math.max(13, Math.min(22, width * .016, height * .045));
+      backgroundCtx.font = `600 ${fontSize}px Arial, sans-serif`;
+      const extrema = minPrice === maxPrice ? [['最高/最低', maxPrice]] : [['最高', maxPrice], ['最低', minPrice]];
+      const descriptions = [];
+      for (const [name, value] of extrema) {
+        const point = cachedSeries.find(([, price]) => price === value);
+        const text = `${name} ${value.toFixed(2)} 元`;
+        const anchor = { x: toX(point[0]), y: toY(value) };
+        const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea);
+        backgroundCtx.strokeStyle = '#e35b60';
+        backgroundCtx.fillStyle = '#e35b60';
+        backgroundCtx.lineWidth = 1.5;
+        backgroundCtx.beginPath();
+        backgroundCtx.moveTo(anchor.x, anchor.y);
+        backgroundCtx.lineTo(label.end, anchor.y);
+        backgroundCtx.stroke();
+        backgroundCtx.textBaseline = 'bottom';
+        backgroundCtx.fillText(text, label.x, anchor.y - 6);
+        descriptions.push(text);
+      }
+      document.querySelector('.chart-description').textContent = `当前${{day: '24小时', week: '7天', month: '30天'}[selectedPeriod]}，${descriptions.join('，')}，单位人民币/克`;
+    }
   }
 
   function startAnimation() {
@@ -360,13 +390,16 @@ const chartRenderer = (() => {
   window.addEventListener('resize', () => requestStaticDraw(lastDrawProgress));
   window.addEventListener('orientationchange', () => requestStaticDraw(lastDrawProgress));
 
+  new ResizeObserver(() => { layoutController.refreshHeight(); requestStaticDraw(); }).observe(document.querySelector('.container'));
+  new MutationObserver(() => requestStaticDraw()).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  window.visualViewport?.addEventListener('resize', () => requestStaticDraw());
   requestStaticDraw();
 
   return {
     render(seriesByPeriod = {}, period = 'day', shouldAnimate = false) {
       const activePeriod = Object.prototype.hasOwnProperty.call(PERIOD_RANGES, period) ? period : 'day';
       const rawSeries = Array.isArray(seriesByPeriod[activePeriod]) ? seriesByPeriod[activePeriod] : [];
-      cachedSeries = rawSeries.filter((point) => Array.isArray(point) && point.length >= 2);
+      cachedSeries = rawSeries.filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]) && point[1] > 0);
 
       if (resizeFrame) {
         cancelAnimationFrame(resizeFrame);
@@ -390,12 +423,10 @@ const chartRenderer = (() => {
   };
 })();
 
-// 最新主报价和独立对照每分钟更新；历史趋势每五分钟更新。
+// 最新主报价每分钟更新；历史趋势每五分钟更新。
 const API_BASE = 'https://api.goldprice.yanrrd.com';
-const comparisonElement = document.querySelector('.comparison');
 const historyStatusElement = document.querySelector('.history-status');
 let lastPrimary = null;
-let lastComparison = null;
 let primaryFailed = false;
 let lastHistoryRefresh = 0;
 let refreshInProgress = false;
@@ -433,38 +464,6 @@ async function refreshPrimary() {
   renderPrimary();
 }
 
-async function refreshComparison() {
-  let failed = false;
-  try {
-    const payload = GoldPriceModel.comparison(await fetchPayload('/compare?currency=cny&unit=grams'));
-    if (!lastComparison || payload.dataTimestamp >= lastComparison.dataTimestamp) lastComparison = payload;
-    failed = payload.updateFailed === true;
-  } catch (_) { failed = true; }
-  if (!lastComparison) {
-    comparisonElement.textContent = 'gold-api.com 对照价暂不可用 · 不影响主报价';
-    return;
-  }
-  const age = Date.now() - lastComparison.dataTimestamp;
-  const label = failed ? '（更新失败，保留上次值）' : age > 2 * 3600_000 ? '（较旧报价）' : '';
-  const time = new Date(lastComparison.dataTimestamp).toLocaleString();
-  comparisonElement.textContent = `独立对照：${lastComparison.price.toFixed(2)} CNY/克 · gold-api.com ${label} · ${time}`;
-}
-
-function renderRangeSummary() {
-  const points = cachedSeriesByPeriod[selectedPeriod] || [];
-  let high = -Infinity;
-  let low = Infinity;
-  for (const point of points) {
-    if (Array.isArray(point) && Number.isFinite(point[1]) && point[1] > 0) {
-      high = Math.max(high, point[1]);
-      low = Math.min(low, point[1]);
-    }
-  }
-  document.querySelector('.range-period').textContent = `当前 ${{ day: '24H', week: '7天', month: '30天' }[selectedPeriod]}`;
-  document.querySelector('.range-high').textContent = `最高 ${Number.isFinite(high) ? high.toFixed(2) : '—'}`;
-  document.querySelector('.range-low').textContent = `最低 ${Number.isFinite(low) ? low.toFixed(2) : '—'}`;
-}
-
 async function refreshHistory(animate) {
   const periods = Object.keys(PERIOD_RANGES);
   const results = await Promise.allSettled(periods.map(async period => {
@@ -495,7 +494,6 @@ async function refreshHistory(animate) {
   }
   renderPrimary();
   changeBoardRenderer.render(cachedSeriesByPeriod);
-  renderRangeSummary();
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
 }
 
@@ -503,7 +501,7 @@ async function refreshPrices(animate = false) {
   if (refreshInProgress) return;
   refreshInProgress = true;
   try {
-    const tasks = [refreshPrimary(), refreshComparison()];
+    const tasks = [refreshPrimary()];
     if (Date.now() - lastHistoryRefresh >= 5 * 60_000) tasks.push(refreshHistory(animate));
     await Promise.allSettled(tasks);
   } finally { refreshInProgress = false; }
@@ -567,7 +565,7 @@ const changeBoardRenderer = (() => {
     const absoluteValue = Math.abs(changeValue).toFixed(2);
     const absolutePercent = Math.abs(changePercent).toFixed(2);
     const arrowSymbol = direction === 'up' ? '▲' : direction === 'down' ? '▼' : '▬';
-    const signedValue = changeValue > 0 ? `${absoluteValue} CNY` : changeValue < 0 ? `${absoluteValue} CNY` : absoluteValue;
+    const signedValue = changeValue > 0 ? `${absoluteValue}` : changeValue < 0 ? `${absoluteValue}` : absoluteValue;
     const signedPercent = changePercent > 0 ? `${absolutePercent}%` : changePercent < 0 ? `${absolutePercent}%` : `${absolutePercent}%`;
     const valueLines = [signedValue, signedPercent];
     const extraText = `起始价：${baselinePrice.toFixed(2)}`;
