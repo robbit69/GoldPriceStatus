@@ -23,3 +23,11 @@ test('XS extrema use free space without scaling the main content', () => {
     assert.ok(lanes.low <= height - safe.bottom - 12);
   }
 });
+
+test('top corner control moves the label away while keeping its extremum anchor', () => {
+  const safe = {left: 0, right: 0};
+  const control = {left: 740, right: 800, top: 2, bottom: 28, width: 60, height: 26};
+  const label = layout.label({x: 790, y: 38}, 108, 812, safe, [control], 14);
+  assert.ok(label.x + 108 < control.left);
+  assert.equal(label.end, label.x);
+});

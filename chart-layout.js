@@ -20,7 +20,7 @@
       const x = candidates.find(x => !obstacles.some(box => box.width > 0 && box.height > 0 &&
         x < box.right + 4 && x + textWidth > box.left - 4 &&
         anchor.y - 6 - fontSize < box.bottom + 4 && anchor.y - 6 > box.top - 4)) ?? candidates[0];
-      return { x, end: goLeft ? x : x + textWidth };
+      return { x, end: x < anchor.x ? x : x + textWidth };
     }
   };
   root.GoldChartLayout = layout;
