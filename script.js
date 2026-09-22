@@ -10,6 +10,8 @@ const backgroundCtx = backgroundCanvas ? backgroundCanvas.getContext('2d') : nul
 const changeCards = document.querySelectorAll('.change-card');
 
 let selectedPeriod = 'day';
+const isIOS = /iP(ad|od|hone)/i.test(navigator.userAgent);
+document.documentElement.classList.toggle('ios', isIOS);
 
 
 function readSafeAreaInsets() {
@@ -57,6 +59,7 @@ const layoutController = (() => {
   function setAppHeight() {
     const height = window.visualViewport?.height || window.innerHeight;
     document.documentElement.style.setProperty('--app-height', `${height}px`);
+    document.documentElement.style.setProperty('--app-width', `${window.visualViewport?.width || document.documentElement.clientWidth}px`);
 
   }
 
@@ -80,8 +83,7 @@ const layoutController = (() => {
   };
 })();
 
-// 功能：识别是否为 iOS 设备
-const isIOS = /iP(ad|od|hone)/i.test(navigator.userAgent);
+
 
 // 功能：负责管理全屏进入/退出
 const fullscreenController = (() => {
