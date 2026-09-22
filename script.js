@@ -59,7 +59,7 @@ const layoutController = (() => {
   function setAppHeight() {
     const height = window.visualViewport?.height || window.innerHeight;
     document.documentElement.style.setProperty('--app-height', `${height}px`);
-    document.documentElement.style.setProperty('--app-width', `${window.visualViewport?.width || document.documentElement.clientWidth}px`);
+    document.documentElement.style.setProperty('--app-width', `${Math.min(window.innerWidth, document.documentElement.clientWidth, window.visualViewport?.width || window.innerWidth)}px`);
 
   }
 
@@ -76,7 +76,13 @@ const layoutController = (() => {
   disableManualScroll();
   window.visualViewport?.addEventListener('resize', setAppHeight);
   window.addEventListener('resize', setAppHeight);
-  window.addEventListener('orientationchange', setAppHeight);
+  function settleViewport() {
+    setAppHeight();
+    requestAnimationFrame(setAppHeight);
+    setTimeout(setAppHeight, 350);
+  }
+  window.addEventListener('orientationchange', settleViewport);
+  window.addEventListener('pageshow', settleViewport);
 
   return {
     refreshHeight: setAppHeight
@@ -90,6 +96,7 @@ const fullscreenController = (() => {
   // 功能：在进入全屏时更新样式
   function handleEnterFullscreen() {
     document.body.classList.add('fullscreen');
+    document.documentElement.style.backgroundColor = '#000';
     fullscreenButton.style.display = 'none';
     layoutController.refreshHeight();
   }
@@ -97,6 +104,7 @@ const fullscreenController = (() => {
   // 功能：在退出全屏时恢复样式
   function handleExitFullscreen() {
     document.body.classList.remove('fullscreen');
+    document.documentElement.style.backgroundColor = '#f0f0f0';
     fullscreenButton.style.display = 'block';
     layoutController.refreshHeight();
   }
