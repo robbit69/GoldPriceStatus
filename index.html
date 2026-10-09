@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>金价监控</title>
+  <title>行情看板 · 黄金 / 比特币 / 股票</title>
   <style>
     :root {
       --app-height: 100vh; /* 通过 JS 动态更新，保证移动端高度准确 */
@@ -272,15 +272,51 @@
       .change-card .change-value { flex-wrap: wrap; }
     }
     html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #f0f0f0; }
+    .asset-label { font-size: 14px; font-weight: 600; color: #947427; }
+    .asset-source { font-size: 11px; line-height: 1.2; color: #806d45; text-align: center; }
+    #assetSwitchButton { position: fixed; z-index: 1000; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px);
+      max-width: 45%; border: 1px solid #d4af3740; border-radius: 18px; padding: 5px 12px; font: 600 14px Arial, sans-serif;
+      color: #80631b; background: #ffffffc9; cursor: pointer; }
+    .fullscreen .asset-label, .fullscreen .asset-source { color: #d4af37; }
+    .fullscreen #assetSwitchButton { background: #252218; color: #d4af37; }
+    #assetDialog { width: min(440px, calc(100vw - var(--safe-left) - var(--safe-right) - 32px));
+      max-height: calc(var(--app-height) - var(--safe-top) - var(--safe-bottom) - 24px); overflow: auto;
+      box-sizing: border-box; padding: 20px; border: 1px solid #d4af3760; border-radius: 20px;
+      background: #f8f6ef; color: #514321; box-shadow: 0 12px 50px #0004; }
+    #assetDialog::backdrop { background: #0005; }
+    .dialog-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .dialog-heading h2 { margin: 0; font-size: 20px; }
+    #closeAssetDialog { border: 0; background: transparent; padding: 4px 8px; font-size: 24px; color: #514321; cursor: pointer; }
+    .asset-options { display: flex; gap: 8px; margin-bottom: 16px; }
+    .asset-options button, .saved-stocks button { border: 1px solid #d4af3760; border-radius: 12px; background: #fff9; padding: 10px 14px; color: #80631b; font-size: 16px; cursor: pointer; }
+    .asset-options button { flex: 1; }
+    .asset-options button[aria-pressed="true"], .saved-stocks button[aria-pressed="true"] { background: #d4af37; color: #fff; }
+    #stockForm label { display: block; font-size: 14px; margin-bottom: 8px; }
+    .stock-entry { display: flex; gap: 8px; }
+    #stockMarket, #stockSymbol { box-sizing: border-box; min-width: 0; border: 1px solid #d4af3760; border-radius: 10px; padding: 10px 8px; background: #fff; color: #514321; font-size: 16px; }
+    #stockMarket { width: 100px; }
+    #stockSymbol { flex: 1; width: 100%; }
+    #stockForm button[type="submit"] { width: 100%; margin-top: 10px; border: 0; border-radius: 10px; padding: 10px; background: #b88e20; color: #fff; font-size: 16px; cursor: pointer; }
+    .stock-help { margin: 10px 0; font-size: 12px; line-height: 1.5; color: #7b725f; }
+    .saved-stocks { display: flex; gap: 6px; flex-wrap: wrap; }
+    .saved-stocks button { padding: 7px 10px; font-size: 13px; }
+    #stockError { margin: 8px 0 0; color: #b33636; font-size: 13px; }
+    #stockError:empty { display: none; }
+    @media (orientation: landscape) and (max-height: 500px) {
+      .asset-label { font-size: 12px; }
+      .asset-source { font-size: 10px; }
+    }
   </style>
 </head>
 <body>
   <canvas id="backgroundChart" aria-hidden="true"></canvas>
   <div class="chart-description" aria-live="polite"></div>
   <div class="container">
+    <div class="asset-label">黄金</div>
     <div class="price">加载中...</div>
     <div class="time"></div>
     <div class="status" aria-live="polite">状态加载中...</div>
+    <div class="asset-source">World Gold Council · CNY/克</div>
     <div class="history-status" aria-live="polite"></div>
     <div class="change-board" aria-live="polite">
       <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
@@ -304,10 +340,30 @@
     </div>
 
   </div>
+  <button id="assetSwitchButton" aria-haspopup="dialog" aria-controls="assetDialog">黄金 ▾</button>
+  <dialog id="assetDialog" aria-labelledby="assetDialogTitle">
+    <div class="dialog-heading"><h2 id="assetDialogTitle">切换行情</h2><button id="closeAssetDialog" aria-label="关闭">×</button></div>
+    <div class="asset-options" aria-label="资产类型">
+      <button type="button" data-asset="gold" aria-pressed="true">黄金</button>
+      <button type="button" data-asset="bitcoin" aria-pressed="false">比特币</button>
+    </div>
+    <form id="stockForm">
+      <label for="stockSymbol">股票代码</label>
+      <div class="stock-entry">
+        <select id="stockMarket" aria-label="股票市场"><option value="auto">自动识别</option><option value="US">美股</option><option value="SH">沪股</option><option value="SZ">深股</option><option value="HK">港股</option></select>
+        <input id="stockSymbol" type="text" placeholder="AAPL / 600519 / 0700.HK" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+      </div>
+      <button type="submit">查看股票行情</button>
+      <p id="stockError" role="alert"></p>
+    </form>
+    <p class="stock-help">支持美股、A 股及港股。股票和比特币使用各自报价币种，行情可能延迟，曲线按 30 分钟采样。</p>
+    <div id="savedStocks" class="saved-stocks" aria-label="已选及常用股票"></div>
+  </dialog>
   <!-- 全屏按钮，悬浮在底部居中 -->
   <button id="fullscreenButton">全屏</button>
   <script src="price-model.js?v=20260914"></script>
+  <script src="market-model.js?v=20261009-market1"></script>
   <script src="chart-layout.js?v=20260922-safari2"></script>
-  <script src="script.js?v=20261009-xs-fullscreen"></script>
+  <script src="script.js?v=20261009-market1"></script>
 </body>
 </html> 

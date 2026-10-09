@@ -4,10 +4,10 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 function page() {
   const nodes = {};
-  const node = name => nodes[name] ||= { textContent: '', classList: { add() {}, remove() {} } };
+  const node = name => nodes[name] ||= { textContent: '', setAttribute() {}, classList: { add() {}, remove() {} } };
   const context = vm.createContext({
     Date, URL, AbortController, setTimeout, clearTimeout, Promise,
-    document: { querySelector: node },
+    document: { querySelector: node, getElementById: id => node('#' + id), querySelectorAll: () => [] },
     priceElement: node('.price'), timeElement: node('.time'), statusElement: node('.status'),
     PERIOD_RANGES: { day: 1, week: 7, month: 30 },
     cachedSeriesByPeriod: { day: [], week: [], month: [] }, selectedPeriod: 'day',
@@ -15,6 +15,8 @@ function page() {
     fetch: async () => { throw Error('offline'); }
   });
   vm.runInContext(fs.readFileSync('price-model.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('market-model.js', 'utf8'), context);
+  context.createEmptySeriesMap = () => ({ day: [], week: [], month: [] });
   const source = fs.readFileSync('script.js', 'utf8');
   vm.runInContext(source.slice(source.indexOf('// 最新主报价'), source.indexOf('// 功能：负责计算与渲染涨跌幅看板')), context);
   return { context, nodes };
@@ -51,4 +53,53 @@ test('initial latest failure can still show a real primary historical quote with
   await context.refreshHistory(false);
   assert.equal(nodes['.price'].textContent, '938.06 CNY/克');
   assert.match(nodes['.status'].textContent, /更新失败/);
+});
+
+const marketPayload = (asset = 'bitcoin', symbol = 'BTC-USD') => {
+  const time = Date.now() - 60000;
+  return { asset, symbol, currency: 'USD', unit: asset === 'bitcoin' ? 'BTC' : '股', source: 'Yahoo Finance',
+    series: [[time - 86400000, 80000], [time, 81000]], price: 81000, dataTimestamp: time, updateFailed: false };
+};
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('a late gold response cannot overwrite Bitcoin after switching assets', async () => {
+  const { context, nodes } = page();
+  let finishGold;
+  context.fetch = async url => {
+    if (url.includes('/api/market')) return { ok: true, json: async () => marketPayload() };
+    return new Promise(resolve => { finishGold = resolve; });
+  };
+  const old = context.refreshPrimary();
+  context.selectAsset(context.MarketPriceModel.assets.bitcoin);
+  await flush();
+  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  finishGold({ ok: true, json: async () => payload([[Date.now(), 938]]) });
+  await old;
+  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  assert.match(nodes['.asset-label'].textContent, /比特币/);
+});
+
+test('switching to a failing stock clears the previous asset price and chart', async () => {
+  const { context, nodes } = page();
+  context.fetch = async () => ({ ok: true, json: async () => payload([[Date.now(), 938]]) });
+  await context.refreshPrimary();
+  context.fetch = async () => ({ ok: false, json: async () => ({ error: '该股票代码未找到或暂无行情' }) });
+  context.selectAsset(context.MarketPriceModel.stock('ZZZZZZZZ'));
+  await flush();
+  assert.equal(nodes['.price'].textContent, '暂无数据');
+  assert.match(nodes['.status'].textContent, /股票代码未找到/);
+  assert.equal(context.cachedSeriesByPeriod.day.length, 0);
+});
+
+test('Bitcoin outage retains only its own price and history', async () => {
+  const { context, nodes } = page();
+  context.fetch = async () => ({ ok: true, json: async () => marketPayload() });
+  context.selectAsset(context.MarketPriceModel.assets.bitcoin);
+  await flush();
+  const history = JSON.stringify(context.cachedSeriesByPeriod);
+  context.fetch = async () => { throw Error('offline'); };
+  await context.refreshPrices();
+  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  assert.match(nodes['.status'].textContent, /更新失败.*保留/);
+  assert.equal(JSON.stringify(context.cachedSeriesByPeriod), history);
 });

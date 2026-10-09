@@ -63,6 +63,7 @@ const layoutController = (() => {
   // 功能：禁用浏览器滚轮与触摸滚动
   function disableManualScroll() {
     const preventScrollHandler = (event) => {
+      if (event.target.closest?.('dialog, input, select')) return;
       event.preventDefault();
     };
     window.addEventListener('wheel', preventScrollHandler, { passive: false });
@@ -332,10 +333,10 @@ const chartRenderer = (() => {
       const descriptions = [];
       for (const [name, value] of extrema) {
         const point = cachedSeries.find(([, price]) => price === value);
-        const text = `${name} ${value.toFixed(2)} 元`;
+        const text = `${name} ${value.toFixed(2)} ${currentCurrency === 'CNY' ? '元' : currentCurrency}`;
         const anchor = { x: toX(point[0]), y: toY(value) };
         const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea,
-          [fullscreenButton.getBoundingClientRect()], fontSize);
+          [fullscreenButton.getBoundingClientRect(), document.getElementById('assetSwitchButton').getBoundingClientRect()], fontSize);
         backgroundCtx.strokeStyle = '#e35b60';
         backgroundCtx.fillStyle = '#e35b60';
         backgroundCtx.lineWidth = 1.5;
@@ -347,7 +348,7 @@ const chartRenderer = (() => {
         backgroundCtx.fillText(text, label.x, anchor.y - 6);
         descriptions.push(text);
       }
-      document.querySelector('.chart-description').textContent = `当前${{day: '24小时', week: '7天', month: '30天'}[selectedPeriod]}，${descriptions.join('，')}，单位人民币/克`;
+      document.querySelector('.chart-description').textContent = `${currentAsset.name}，当前${{day: '24小时', week: '7天', month: '30天'}[selectedPeriod]}，${descriptions.join('，')}，单位${currentCurrency}/${currentAsset.unit}`;
     }
   }
 
@@ -427,6 +428,11 @@ const chartRenderer = (() => {
 // 最新主报价每分钟更新；历史趋势每五分钟更新。
 const API_BASE = 'https://api.goldprice.yanrrd.com';
 const historyStatusElement = document.querySelector('.history-status');
+let currentAsset = MarketPriceModel.assets.gold;
+let currentCurrency = 'CNY';
+let refreshEpoch = 0;
+let refreshInProgressEpoch = 0;
+const activeRequests = new Set();
 let lastPrimary = null;
 let primaryFailed = false;
 let lastHistoryRefresh = 0;
@@ -434,17 +440,24 @@ let refreshInProgress = false;
 
 async function fetchPayload(path) {
   const controller = new AbortController();
+  activeRequests.add(controller);
   const timeout = setTimeout(() => controller.abort(), 22000);
   try {
-    const response = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await fetch(path.startsWith('/api/') ? path : `${API_BASE}${path}`, { signal: controller.signal });
+    if (!response.ok) {
+      if (path.startsWith('/api/')) {
+        const body = await response.json().catch(() => ({}));
+        throw Error(body.error || '暂时无法获取行情');
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
     return await response.json();
-  } finally { clearTimeout(timeout); }
+  } finally { clearTimeout(timeout); activeRequests.delete(controller); }
 }
 
 function renderPrimary() {
   const timestamp = lastPrimary?.timestamp;
-  priceElement.textContent = lastPrimary ? lastPrimary.price.toFixed(2) + ' CNY/克' : '暂无数据';
+  priceElement.textContent = lastPrimary ? `${lastPrimary.price.toFixed(2)} ${currentCurrency}/${currentAsset.unit}` : '暂无数据';
   timeElement.textContent = timestamp ? '报价时间：' + new Date(timestamp).toLocaleString() : '—';
   const status = GoldPriceModel.status(timestamp, primaryFailed);
   statusElement.textContent = status.text;
@@ -452,25 +465,27 @@ function renderPrimary() {
   statusElement.classList.add(status.className);
 }
 
-async function refreshPrimary() {
+async function refreshPrimary(epoch = refreshEpoch) {
   try {
     const payload = await fetchPayload('/price?currency=cny&unit=grams');
+    if (epoch !== refreshEpoch) return;
     const points = GoldPriceModel.series(payload);
     const latest = points[points.length - 1];
     if (latest && (!lastPrimary || latest[0] >= lastPrimary.timestamp)) {
       lastPrimary = { price: latest[1], timestamp: latest[0] };
     }
     primaryFailed = payload.updateFailed === true;
-  } catch (_) { primaryFailed = true; }
+  } catch (_) { if (epoch !== refreshEpoch) return; primaryFailed = true; }
   renderPrimary();
 }
 
-async function refreshHistory(animate) {
+async function refreshHistory(animate, epoch = refreshEpoch) {
   const periods = Object.keys(PERIOD_RANGES);
   const results = await Promise.allSettled(periods.map(async period => {
     const payload = await fetchPayload(`/price?currency=cny&unit=grams&period=${period}`);
     return { points: GoldPriceModel.series(payload), failed: payload.updateFailed === true };
   }));
+  if (epoch !== refreshEpoch) return;
   const failed = [];
   results.forEach((result, index) => {
     const period = periods[index];
@@ -499,13 +514,80 @@ async function refreshHistory(animate) {
 }
 
 async function refreshPrices(animate = false) {
-  if (refreshInProgress) return;
+  const epoch = refreshEpoch;
+  if (refreshInProgress && refreshInProgressEpoch === epoch) return;
   refreshInProgress = true;
+  refreshInProgressEpoch = epoch;
   try {
-    const tasks = [refreshPrimary()];
-    if (Date.now() - lastHistoryRefresh >= 5 * 60_000) tasks.push(refreshHistory(animate));
-    await Promise.allSettled(tasks);
-  } finally { refreshInProgress = false; }
+    if (currentAsset.type === 'gold') {
+      const tasks = [refreshPrimary(epoch)];
+      if (Date.now() - lastHistoryRefresh >= 5 * 60_000) tasks.push(refreshHistory(animate, epoch));
+      await Promise.allSettled(tasks);
+    } else {
+      await refreshMarket(animate, epoch);
+    }
+  } finally { if (epoch === refreshEpoch) refreshInProgress = false; }
+}
+
+async function refreshMarket(animate, epoch) {
+  const asset = currentAsset;
+  try {
+    const payload = await fetchPayload(`/api/market?asset=${asset.type}&symbol=${encodeURIComponent(asset.symbol)}`);
+    if (epoch !== refreshEpoch) return;
+    const result = MarketPriceModel.parse(payload, asset);
+    currentCurrency = result.currency;
+    if (!lastPrimary || result.timestamp >= lastPrimary.timestamp) lastPrimary = { price: result.price, timestamp: result.timestamp };
+    primaryFailed = result.failed;
+    // Failed refreshes retain this asset's own history, never another asset's history.
+    if (!result.failed || !Object.values(cachedSeriesByPeriod).some(points => points.length)) {
+      cachedSeriesByPeriod = MarketPriceModel.periods(result.points);
+    }
+    historyStatusElement.textContent = result.failed ? '曲线更新失败，已有曲线保留' : '';
+    renderAssetMeta();
+    renderPrimary();
+    changeBoardRenderer.render(cachedSeriesByPeriod);
+    chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
+  } catch (error) {
+    if (epoch !== refreshEpoch) return;
+    primaryFailed = true;
+    renderPrimary();
+    if (!lastPrimary) statusElement.textContent += ` · ${error.message}`;
+    historyStatusElement.textContent = '曲线更新失败，已有曲线保留';
+  }
+}
+
+function renderAssetMeta() {
+  document.querySelector('.asset-label').textContent = currentAsset.type === 'stock' ? `股票 · ${currentAsset.symbol}` : currentAsset.name;
+  document.querySelector('.asset-source').textContent = currentAsset.type === 'gold' ? 'World Gold Council · CNY/克' :
+    `Yahoo Finance · ${currentCurrency}/${currentAsset.unit} · 30 分钟采样 · 行情可能延迟`;
+  document.getElementById('assetSwitchButton').textContent = `${currentAsset.name} ▾`;
+  document.title = `${currentAsset.name} · 行情看板`;
+  document.querySelectorAll('[data-asset]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.asset === currentAsset.type)));
+}
+
+function selectAsset(asset) {
+  if (asset.type === currentAsset.type && asset.symbol === currentAsset.symbol) {
+    refreshPrices(true);
+    return;
+  }
+  refreshEpoch++;
+  activeRequests.forEach(controller => controller.abort());
+  activeRequests.clear();
+  currentAsset = asset;
+  currentCurrency = asset.currency;
+  lastPrimary = null;
+  primaryFailed = false;
+  lastHistoryRefresh = 0;
+  cachedSeriesByPeriod = createEmptySeriesMap();
+  historyStatusElement.textContent = '正在获取曲线...';
+  renderAssetMeta();
+  renderPrimary();
+  priceElement.textContent = '加载中...';
+  statusElement.textContent = '正在获取行情...';
+  changeBoardRenderer.render(cachedSeriesByPeriod);
+  chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, false);
+  try { localStorage.setItem('market-selection', JSON.stringify({ type: asset.type, symbol: asset.symbol })); } catch (_) {}
+  refreshPrices(true);
 }
 
 // 功能：负责计算与渲染涨跌幅看板
@@ -637,6 +719,71 @@ changeCards.forEach((card) => {
 });
 
 updateCardSelectionUI();
+
+// Keep the selector separate from the ambient display and preserve the last choice.
+(() => {
+  const dialog = document.getElementById('assetDialog');
+  const input = document.getElementById('stockSymbol');
+  const market = document.getElementById('stockMarket');
+  const error = document.getElementById('stockError');
+  const savedElement = document.getElementById('savedStocks');
+  let stocks = ['AAPL', 'TSLA', '600519.SS', '0700.HK'];
+  try {
+    const saved = JSON.parse(localStorage.getItem('market-stocks'));
+    if (Array.isArray(saved)) stocks = [...new Set(saved.slice(0, 20).map(symbol => MarketPriceModel.stock(symbol).symbol))];
+  } catch (_) {}
+  const close = () => typeof dialog.close === 'function' ? dialog.close() : dialog.removeAttribute('open');
+  function renderStocks() {
+    savedElement.replaceChildren();
+    stocks.forEach(symbol => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = symbol;
+      button.setAttribute('aria-pressed', String(currentAsset.type === 'stock' && currentAsset.symbol === symbol));
+      button.addEventListener('click', () => chooseStock(symbol));
+      savedElement.append(button);
+    });
+  }
+  function chooseStock(symbol, selectedMarket = 'auto') {
+    try {
+      const asset = MarketPriceModel.stock(symbol, selectedMarket);
+      stocks = [asset.symbol, ...stocks.filter(item => item !== asset.symbol)].slice(0, 20);
+      try { localStorage.setItem('market-stocks', JSON.stringify(stocks)); } catch (_) {}
+      error.textContent = '';
+      selectAsset(asset);
+      renderStocks();
+      close();
+    } catch (failure) { error.textContent = failure.message; }
+  }
+  document.getElementById('assetSwitchButton').addEventListener('click', event => {
+    event.stopPropagation();
+    error.textContent = '';
+    if (currentAsset.type === 'stock') { input.value = currentAsset.symbol; market.value = 'auto'; }
+    renderStocks();
+    if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+  });
+  document.getElementById('closeAssetDialog').addEventListener('click', close);
+  dialog.addEventListener('click', event => {
+    event.stopPropagation();
+    const box = dialog.getBoundingClientRect();
+    if (event.target === dialog && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)) close();
+  });
+  document.querySelectorAll('[data-asset]').forEach(button => button.addEventListener('click', () => {
+    selectAsset(MarketPriceModel.assets[button.dataset.asset]);
+    close();
+  }));
+  document.getElementById('stockForm').addEventListener('submit', event => {
+    event.preventDefault();
+    chooseStock(input.value, market.value);
+  });
+  renderStocks();
+  renderAssetMeta();
+  try {
+    const saved = JSON.parse(localStorage.getItem('market-selection'));
+    if (saved?.type === 'bitcoin') selectAsset(MarketPriceModel.assets.bitcoin);
+    else if (saved?.type === 'stock') selectAsset(MarketPriceModel.stock(saved.symbol));
+  } catch (_) {}
+})();
 
 // 后台页面暂停轮询，返回页面时刷新；防止慢请求重叠。
 refreshPrices(true);
