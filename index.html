@@ -9,287 +9,150 @@
   <title>行情看板 · 黄金 / 比特币 / 股票</title>
   <style>
     :root {
-      --app-height: 100vh; /* 通过 JS 动态更新，保证移动端高度准确 */
+      --app-height: 100vh;
       --app-left: 0px;
       --app-top: 0px;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
-      --change-up-color: #e76b67;
-      --change-down-color: #4cd186;
-      --change-neutral-color: #c28c13;
+      --change-up-color: #d95c5c;
+      --change-down-color: #259f70;
+      --change-neutral-color: #947427;
+      --muted-color: #806d45;
+      --control-background: #ffffffd9;
+      --control-border: #b88e2038;
     }
-    html,
-    body {
-      overflow: hidden; /* 禁止任何滚动行为 */
-      overscroll-behavior: none; /* 防止触顶/触底回弹 */
-    }
+    @supports (height: 100dvh) { :root { --app-height: 100dvh; } }
+    html, body { overflow: hidden; overscroll-behavior: none; }
+    html { height: 100%; background: #f0f0f0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body {
       margin: 0;
-      padding: 0;
-      font-family: Arial, sans-serif;
-      background-color: #f0f0f0; /* 灰白色背景 */
-      color: #d4af37; /* 金色文字 */
+      padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      background: #f0f0f0;
+      color: #d4af37;
       display: flex;
       justify-content: center;
       align-items: center;
+      width: var(--app-width, 100%);
       height: var(--app-height);
+      min-width: 0;
       position: fixed;
       left: var(--app-left);
       top: var(--app-top);
-      touch-action: manipulation; /* 禁止滚动手势但保留点击 */
+      touch-action: manipulation;
     }
+    /* One coordinate system: the background fills the viewport; only foreground avoids the notch. */
     #backgroundChart {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 0;
-      opacity: 0.6;
-      pointer-events: none;
+      position: absolute; top: 0; left: 0;
+      width: var(--app-width, 100%); height: var(--app-height);
+      z-index: 0; pointer-events: none;
     }
     .container {
-      text-align: center;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      gap: 1.2em;
-      width: min(90vw, 80%);
-      padding-left: max(18px);
-      padding-right: max(18px);
-      box-sizing: border-box;
-      height: 100%;
-      position: relative;
-      z-index: 1;
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column; align-items: center;
+      width: min(1000px, calc(100% - 32px)); min-width: 0;
+      gap: clamp(10px, 2vh, 22px); text-align: center;
     }
+    .asset-label { font-size: 13px; font-weight: 600; color: var(--muted-color); }
     .price {
-      font-size: 5vw; /* 默认字体 */
-      font-weight: bold;
-      margin-top: -30px;
+      margin: 0; font-size: clamp(38px, min(8vw, 14vh), 112px);
+      font-weight: 650; letter-spacing: -.035em; line-height: 1.06;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
     }
-    .time {
-      font-size: 2vw; /* 时间文字大小 */
-      margin-top: -1em;
-    }
-    .status {
-      font-size: 2.4vw;
-      font-weight: 600;
-      display: flex;
-      gap: 0.4em;
-      align-items: center;
-    }
-    .status.stopped {
-      color: #c0392b;
-    }
-    .status.active {
-      color: #27ae60;
-    }
-    .history-status { color: #a36b38; font-size: 12px; line-height: 1.3; }
+    .price-unit { font-size: .25em; font-weight: 500; letter-spacing: 0; opacity: .78; }
+    .quote-meta { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+    .time { margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted-color); white-space: nowrap; }
+    .status { font-size: 14px; font-weight: 500; line-height: 1.4; }
+    .status.stopped { color: #d95c5c; }
+    .status.active { color: #259f70; }
+    .asset-source { font-size: 11px; line-height: 1.4; color: var(--muted-color); }
+    .history-status { font-size: 12px; line-height: 1.4; color: #a36b38; }
     .history-status:empty { display: none; }
-    .change-board {
-      width: 100%;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 0.8em;
-      margin-top: 0.6em;
-    }
+    .change-board { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .change-card {
-      background: rgba(255, 255, 255, 0.36);
-      border-radius: 14px;
-      padding: 0.45em 1.1em;
-      display: flex;
-      flex-direction: column;
-      gap: 0.35em;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 16px 36px rgba(212, 175, 55, 0.18),
-                  inset 0 0 0 1px rgba(255, 255, 255, 0.274);
-      position: relative;
-      cursor: pointer;
+      position: relative; min-width: 0; box-sizing: border-box;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: 18px 12px; border: 1px solid #b88e2026; border-radius: 16px;
+      background: #ffffffbf; cursor: pointer;
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      touch-action: manipulation; font-variant-numeric: tabular-nums;
     }
-    .change-card .period {
-      font-size: 1.9vw;
-      color: rgba(222, 172, 45, 0.885);
+    .change-card.active { border-color: #b88e208c; box-shadow: inset 0 -2px 0 #b88e2059; }
+    .change-card .period { font-size: 14px; line-height: 1.25; color: var(--muted-color); white-space: nowrap; }
+    .change-value { display: flex; align-items: center; justify-content: center; gap: .25em;
+      font-size: clamp(20px, 3vw, 34px); font-weight: 650; line-height: 1.1; color: var(--change-neutral-color); }
+    .change-up { color: var(--change-up-color); }
+    .change-down { color: var(--change-down-color); }
+    .change-flat { color: var(--change-neutral-color); }
+    .change-arrow { font-size: .65em; line-height: 1; }
+    .change-lines { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 2px 8px; min-width: 0; }
+    .change-line:first-child { white-space: nowrap; }
+    .change-line:last-child { font-size: .52em; font-weight: 500; opacity: .85; }
+    .change-extra { font-size: 12px; line-height: 1.3; color: var(--muted-color); white-space: nowrap; }
+    .indicator { position: absolute; top: 12px; right: 12px; width: 5px; height: 5px; border-radius: 50%; background: #a3987940; }
+    .change-card.active .indicator { background: #d4af37; }
+    button:focus-visible, .change-card:focus-visible { outline: 2px solid #d4af37; outline-offset: 4px; }
+    #assetSwitchButton, #fullscreenButton {
+      position: absolute; z-index: 1000; box-sizing: border-box;
+      min-height: 44px; padding: 8px 16px; border-radius: 999px;
+      border: 1px solid var(--control-border); background: var(--control-background);
+      color: var(--muted-color); font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     }
-    .change-card .change-value {
-      font-size: 2.4vw;
-      font-weight: 700;
-      color: var(--change-neutral-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.55em;
-      line-height: 0.8;
-      text-align: left;
-      transition: color 0.2s ease;
-      padding: 0.15em 0;
-    }
-    .change-card .change-value.change-up {
-      color: var(--change-up-color);
-    }
-    .change-card .change-value.change-down {
-      color: var(--change-down-color);
-    }
-    .change-card .change-value.change-flat {
-      color: var(--change-neutral-color);
-    }
-    .change-card .change-arrow {
-      font-size: 3vw;
-      line-height: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 1em;
-    }
-    .change-card .change-lines {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.25em;
-    }
-    .change-card .change-line:first-child {
-      font-size: 2.4vw;
-    }
-    .change-card .change-line:last-child {
-      font-size: 2vw;
-      font-weight: 600;
-      opacity: 0.85;
-    }
-    .change-card .change-extra {
-      font-size: 1.6vw;
-      color: rgba(238, 196, 58, 0.885);
-    }
-    .change-card .indicator {
-      position: absolute;
-      top: 12px;
-      right: 14px;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: rgba(180, 180, 180, 0.35);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
-      transition: background-color 0.2s ease, box-shadow 0.2s ease;
-    }
-    .change-card.active .indicator {
-      background: rgba(246, 196, 76, 0.85);
-      box-shadow: 0 0 8px rgba(246, 196, 76, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.65);
-    }
-    .change-card:focus-visible {
-      outline: 2px solid rgba(246, 196, 76, 0.6);
-      outline-offset: 4px;
-    }
-    /* 全屏时的 body 背景色 */
+    #assetSwitchButton { top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px); max-width: 45%; }
+    #fullscreenButton { width: 96px; bottom: calc(var(--safe-bottom) + 12px); left: 50%; transform: translateX(-50%); }
+    #assetSwitchButton:active, #fullscreenButton:active { border-color: #d4af37; }
     .fullscreen {
-      background-color: #000; /* 全屏时黑色背景 */
-      --change-up-color: #ff6b6b;
-      --change-down-color: #3ddc97;
+      background: #000; --muted-color: #b5a373;
+      --change-up-color: #ff7373; --change-down-color: #4bd7a0;
+      --control-background: #17160ee6; --control-border: #d4af3738;
     }
-    /* 全屏按钮样式，居中显示，轻拟物风格 */
-    #fullscreenButton {
-      position: absolute;
-      bottom: 8vh;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 12px 28px;
-      font-size: 16px;
-      cursor: pointer;
-      z-index: 1000;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.5);
-      background: linear-gradient(145deg, #fdfdfd, #d7d7d7);
-      box-shadow: 6px 6px 12px rgba(0, 0, 0, 0.15),
-                  -6px -6px 12px rgba(255, 255, 255, 0.6);
-      color: #505050;
-      font-weight: 600;
-      width: 96px;
-      min-height: 44px;
-      box-sizing: border-box;
-      touch-action: manipulation;
-      -webkit-tap-highlight-color: transparent;
-      transition: box-shadow 0.2s ease;
-    }
-    #fullscreenButton:active {
-      box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.2),
-                  inset -4px -4px 8px rgba(255, 255, 255, 0.7);
-    }
-    /* Width and height both constrain the display, including XS landscape. */
-    body { padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); box-sizing: border-box; }
-    #backgroundChart { height: var(--app-height); opacity: 1; }
-    .container { width: 84%; height: auto; padding: 0; gap: clamp(8px, 2vh, 24px); }
-    .price { margin: 0; font-size: min(5.5vw, 12vh); line-height: 1.12; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .time { margin: 0; font-size: min(2.1vw, 4.5vh); line-height: 1.3; white-space: nowrap; }
-    .status { font-size: min(2.5vw, 5vh); line-height: 1.3; text-align: center; }
-    .change-board { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(6px, 1vw, 16px); margin-top: 0; }
-    .change-card { min-width: 0; padding: min(1vw, 1.6vh); gap: min(.6vw, 1vh); box-sizing: border-box; }
-    .change-card .period { font-size: min(2vw, 4.5vh); white-space: nowrap; }
-    .change-card .change-value { line-height: 1.15; gap: .25em; padding: 0; font-size: min(2.8vw, 5vh); }
-    .change-card .change-arrow { font-size: .8em; min-width: 0; }
-    .change-card .change-lines { gap: 0; }
-    .change-card .change-line:first-child { font-size: 1em; white-space: nowrap; }
-    .change-card .change-line:last-child { font-size: .8em; }
-    .change-card .change-extra { font-size: min(1.6vw, 3.5vh); white-space: nowrap; }
-    .change-card .indicator { width: 6px; height: 6px; top: 7px; right: 7px; }
-    #fullscreenButton { bottom: calc(var(--safe-bottom) + 12px); padding: 7px 20px; font-size: 13px; }
+    .fullscreen .price { text-shadow: 0 2px 24px #000; }
+    .fullscreen .change-card { background: #12120ee6; border-color: #d4af3726; }
+    .fullscreen .change-card.active { background: #1a180fe6; border-color: #d4af376b; box-shadow: inset 0 -2px 0 #d4af3760; }
+    .fullscreen .status.active { color: #4bd7a0; }
     .chart-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     @media (max-width: 600px) and (orientation: portrait) {
-      .container { width: 94%; gap: 18px; }
-      .price { font-size: 8vw; }
-      .time { font-size: 3.6vw; }
-      .status { font-size: 4.6vw; }
-      .change-card { padding: 14px 4px 10px; gap: 8px; }
-      .change-card .period { font-size: 3.6vw; }
-      .change-card .change-value { font-size: 5vw; }
-      .change-card .change-extra { font-size: 2.9vw; }
+      .container { width: calc(100% - 24px); gap: 18px; }
+      .price { font-size: 14vw; }
+      .quote-meta { flex-direction: column; gap: 5px; }
+      .time { font-size: 12px; }
+      .status { font-size: 13px; }
+      .change-board { gap: 7px; }
+      .change-card { padding: 16px 4px 14px; gap: 10px; border-radius: 12px; }
+      .change-card .period { font-size: 12px; }
+      .change-value { font-size: 5.6vw; }
+      .change-lines { flex-direction: column; align-items: center; gap: 4px; }
+      .change-line:last-child { font-size: .65em; }
+      .change-extra { font-size: 10px; }
+      .indicator { top: 8px; right: 8px; }
+      .asset-source { max-width: 95%; font-size: 10px; }
     }
     @media (orientation: landscape) and (max-height: 500px) {
-      .container { width: 94%; gap: 5px; }
-      .price { font-size: min(8.5vw, calc(var(--app-height) * .17)); line-height: 1.05; }
-      .time { font-size: 15px; line-height: 1.2; }
-      .status { font-size: 18px; line-height: 1.2; }
-      .change-board { gap: 10px; margin-top: 7px; }
-      .change-card { padding: 8px 10px; gap: 3px; border-radius: 10px; }
-      .change-card .period { font-size: 18px; }
-      .change-card .change-value { font-size: 28px; line-height: 1.05; }
-      .change-card .change-line:last-child { font-size: 19px; }
-      .change-card .change-extra { font-size: 13px; }
-      .change-card .change-lines { flex-direction: row; align-items: baseline; gap: 8px; }
-      .history-status { font-size: 11px; }
-      #fullscreenButton { left: auto; right: calc(var(--safe-right) + 12px); top: calc(var(--safe-top) + 2px); bottom: auto; transform: none; padding: 4px 12px; }
+      .container { gap: 10px; }
+      .asset-label { display: none; }
+      .price { font-size: min(11vw, calc(var(--app-height) * .215)); }
+      .time, .status { font-size: 13px; }
+      .change-board { margin-top: 8px; }
+      .change-card { padding: 13px 12px; gap: 9px; border-radius: 13px; }
+      .change-card .period { font-size: 13px; }
+      .change-value { font-size: 30px; }
+      .change-extra { font-size: 11px; }
+      .asset-source, .history-status { font-size: 10px; }
+      #fullscreenButton { left: auto; right: calc(var(--safe-right) + 12px); top: calc(var(--safe-top) + 4px); bottom: auto; transform: none; }
     }
     @media (orientation: landscape) and (max-height: 320px) {
-      .price { font-size: min(8.5vw, calc(var(--app-height) * .16)); }
-      .time { font-size: 13px; }
-      .status { font-size: 16px; }
-      .change-card { padding: 6px 8px; }
-      .change-card .period { font-size: 16px; }
-      .change-card .change-value { font-size: 26px; }
-      .change-card .change-line:last-child { font-size: 17px; }
+      .container { gap: 7px; }
+      .price { font-size: min(10vw, calc(var(--app-height) * .20)); }
+      .time, .status { font-size: 12px; }
+      .change-board { margin-top: 3px; }
+      .change-card { padding: 10px 10px; gap: 7px; }
+      .change-value { font-size: 26px; }
+      .change-extra { font-size: 10px; }
     }
-    .fullscreen .change-card { background: rgba(28, 26, 20, .72); box-shadow: inset 0 0 0 1px rgba(212,175,55,.18); }
-    .fullscreen .change-card.active { box-shadow: inset 0 0 0 1px rgba(212,175,55,.55); }
-    /* The canvas fills the viewport; body padding protects foreground content. */
-    body { width: var(--app-width, 100%); min-width: 0; }
-    #backgroundChart { width: var(--app-width, 100%); }
-    .container { min-width: 0; max-width: calc(100% - 24px); }
-    .change-board, .change-lines { min-width: 0; }
-    @media (orientation: landscape) and (max-height: 500px) {
-
-      .container { width: calc(100% - 24px); }
-      .change-card .change-lines { flex-wrap: wrap; justify-content: center; column-gap: 8px; row-gap: 0; }
-      .change-card .change-value { flex-wrap: wrap; }
-    }
-    html { height: 100%; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #f0f0f0; }
-    @supports (height: 100dvh) { :root { --app-height: 100dvh; } }
-    .asset-label { font-size: 14px; font-weight: 600; color: #947427; }
-    .asset-source { font-size: 11px; line-height: 1.2; color: #806d45; text-align: center; }
-    #assetSwitchButton { position: absolute; z-index: 1000; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px);
-      min-height: 44px; box-sizing: border-box; touch-action: manipulation;
-      max-width: 45%; border: 1px solid #d4af3740; border-radius: 18px; padding: 5px 12px; font: 600 14px Arial, sans-serif;
-      color: #80631b; background: #ffffffc9; cursor: pointer; }
-    .fullscreen .asset-label, .fullscreen .asset-source { color: #d4af37; }
-    .fullscreen #assetSwitchButton { background: #252218; color: #d4af37; }
     #assetDialog { width: min(440px, calc(100vw - var(--safe-left) - var(--safe-right) - 32px));
       max-height: calc(var(--app-height) - var(--safe-top) - var(--safe-bottom) - 24px); overflow: auto;
       box-sizing: border-box; padding: 20px; border: 1px solid #d4af3760; border-radius: 20px;
@@ -325,9 +188,10 @@
   <div class="container">
     <div class="asset-label">黄金</div>
     <div class="price">加载中...</div>
-    <div class="time"></div>
-    <div class="status" aria-live="polite">状态加载中...</div>
-    <div class="asset-source">World Gold Council · CNY/克</div>
+    <div class="quote-meta">
+      <div class="time"></div>
+      <div class="status" aria-live="polite">状态加载中...</div>
+    </div>
     <div class="history-status" aria-live="polite"></div>
     <div class="change-board" aria-live="polite">
       <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
@@ -349,7 +213,7 @@
         <div class="change-extra" data-extra="month">—</div>
       </div>
     </div>
-
+    <div class="asset-source">World Gold Council · CNY/克</div>
   </div>
   <button id="assetSwitchButton" aria-haspopup="dialog" aria-controls="assetDialog">黄金 ▾</button>
   <dialog id="assetDialog" aria-labelledby="assetDialogTitle">
@@ -375,6 +239,6 @@
   <script src="price-model.js?v=20260914"></script>
   <script src="market-model.js?v=20261009-mobile2"></script>
   <script src="chart-layout.js?v=20260922-safari2"></script>
-  <script src="script.js?v=20261009-mobile2"></script>
+  <script src="script.js?v=20261009-polish1"></script>
 </body>
 </html> 

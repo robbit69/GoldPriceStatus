@@ -4,10 +4,12 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 function page() {
   const nodes = {};
-  const node = name => nodes[name] ||= { textContent: '', setAttribute() {}, classList: { add() {}, remove() {} } };
+  const node = name => nodes[name] ||= { textContent: '', setAttribute() {},
+    append(child) { this.textContent += child.textContent; }, classList: { add() {}, remove() {} } };
   const context = vm.createContext({
     Date, URL, AbortController, setTimeout, clearTimeout, Promise,
-    document: { querySelector: node, getElementById: id => node('#' + id), querySelectorAll: () => [] },
+    document: { querySelector: node, getElementById: id => node('#' + id), querySelectorAll: () => [],
+      createElement: () => ({ textContent: '' }) },
     priceElement: node('.price'), timeElement: node('.time'), statusElement: node('.status'),
     PERIOD_RANGES: { day: 1, week: 7, month: 30 },
     cachedSeriesByPeriod: { day: [], week: [], month: [] }, selectedPeriod: 'day',

@@ -317,14 +317,14 @@ const chartRenderer = (() => {
     backgroundCtx.lineWidth = 3.2;
     backgroundCtx.lineJoin = 'round';
     backgroundCtx.lineCap = 'round';
-    backgroundCtx.strokeStyle = 'rgba(236, 198, 76, 0.95)';
+    backgroundCtx.strokeStyle = 'rgba(236, 198, 76, 0.78)';
     backgroundCtx.stroke();
 
     // 绘制填充区域
     const fillBaselineY = height - safeArea.bottom;
     const gradient = backgroundCtx.createLinearGradient(0, verticalOffset, 0, fillBaselineY + safeArea.bottom);
-    gradient.addColorStop(0, 'rgba(236, 198, 76, 0.5)');
-    gradient.addColorStop(1, 'rgba(236, 198, 76, 0.05)');
+    gradient.addColorStop(0, 'rgba(236, 198, 76, 0.26)');
+    gradient.addColorStop(1, 'rgba(236, 198, 76, 0.025)');
 
     backgroundCtx.beginPath();
     backgroundCtx.moveTo(toX(firstPoint[0]), fillBaselineY);
@@ -470,7 +470,13 @@ async function fetchPayload(path) {
 
 function renderPrimary() {
   const timestamp = lastPrimary?.timestamp;
-  priceElement.textContent = lastPrimary ? `${MarketPriceModel.formatPrice(lastPrimary.price, currentAsset)} ${currentCurrency}/${currentAsset.unit}` : '暂无数据';
+  priceElement.textContent = lastPrimary ? `${MarketPriceModel.formatPrice(lastPrimary.price, currentAsset)} ` : '暂无数据';
+  if (lastPrimary) {
+    const unit = document.createElement('span');
+    unit.className = 'price-unit';
+    unit.textContent = `${currentCurrency}/${currentAsset.unit}`;
+    priceElement.append(unit);
+  }
   priceElement.title = lastPrimary ? `${lastPrimary.price.toFixed(2)} ${currentCurrency}/${currentAsset.unit}` : '';
   timeElement.textContent = timestamp ? '报价时间：' + new Date(timestamp).toLocaleString() : '—';
   const status = GoldPriceModel.status(timestamp, primaryFailed);
