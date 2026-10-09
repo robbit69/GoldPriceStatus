@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=contain">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>金价监控</title>
   <style>
@@ -260,7 +260,7 @@
     }
     .fullscreen .change-card { background: rgba(28, 26, 20, .72); box-shadow: inset 0 0 0 1px rgba(212,175,55,.18); }
     .fullscreen .change-card.active { box-shadow: inset 0 0 0 1px rgba(212,175,55,.55); }
-    /* Bound the whole display to Safari's visible viewport, not 100vw. */
+    /* The canvas fills the viewport; body padding protects foreground content. */
     body { width: var(--app-width, 100%); min-width: 0; }
     #backgroundChart { width: var(--app-width, 100%); }
     .container { min-width: 0; max-width: calc(100% - 24px); }
@@ -271,8 +271,6 @@
       .change-card .change-lines { flex-wrap: wrap; justify-content: center; column-gap: 8px; row-gap: 0; }
       .change-card .change-value { flex-wrap: wrap; }
     }
-    /* Safari owns notch containment; do not subtract its horizontal insets twice. */
-    .ios { --safe-left: 0px; --safe-right: 0px; }
     html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #f0f0f0; }
   </style>
 </head>
@@ -310,6 +308,6 @@
   <button id="fullscreenButton">全屏</button>
   <script src="price-model.js?v=20260914"></script>
   <script src="chart-layout.js?v=20260922-safari2"></script>
-  <script src="script.js?v=20260922-safari2"></script>
+  <script src="script.js?v=20261009-xs-cover"></script>
 </body>
 </html> 

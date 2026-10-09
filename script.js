@@ -10,9 +10,6 @@ const backgroundCtx = backgroundCanvas ? backgroundCanvas.getContext('2d') : nul
 const changeCards = document.querySelectorAll('.change-card');
 
 let selectedPeriod = 'day';
-const isIOS = /iP(ad|od|hone)/i.test(navigator.userAgent);
-document.documentElement.classList.toggle('ios', isIOS);
-
 
 function readSafeAreaInsets() {
   const style = getComputedStyle(document.body);
@@ -267,7 +264,8 @@ const chartRenderer = (() => {
 
     const toX = (timestamp) => {
       const ratio = (timestamp - minTime) / timeRange;
-      const x = safeArea.left + 12 + ratio * (width - safeArea.left - safeArea.right - 24);
+      // The background spans the screen; only labels and controls avoid the notch.
+      const x = 12 + ratio * (width - 24);
       return Math.min(width, Math.max(0, x));
     };
     const toY = (price) => {
