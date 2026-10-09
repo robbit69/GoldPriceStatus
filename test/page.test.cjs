@@ -72,10 +72,10 @@ test('a late gold response cannot overwrite Bitcoin after switching assets', asy
   const old = context.refreshPrimary();
   context.selectAsset(context.MarketPriceModel.assets.bitcoin);
   await flush();
-  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  assert.equal(nodes['.price'].textContent, '81.0K USD/BTC');
   finishGold({ ok: true, json: async () => payload([[Date.now(), 938]]) });
   await old;
-  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  assert.equal(nodes['.price'].textContent, '81.0K USD/BTC');
   assert.match(nodes['.asset-label'].textContent, /比特币/);
 });
 
@@ -99,7 +99,7 @@ test('Bitcoin outage retains only its own price and history', async () => {
   const history = JSON.stringify(context.cachedSeriesByPeriod);
   context.fetch = async () => { throw Error('offline'); };
   await context.refreshPrices();
-  assert.equal(nodes['.price'].textContent, '81000.00 USD/BTC');
+  assert.equal(nodes['.price'].textContent, '81.0K USD/BTC');
   assert.match(nodes['.status'].textContent, /更新失败.*保留/);
   assert.equal(JSON.stringify(context.cachedSeriesByPeriod), history);
 });

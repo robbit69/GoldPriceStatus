@@ -52,12 +52,14 @@ function setSelectedPeriod(period) {
 
 // 功能：管理布局高度并彻底关闭滚动
 const layoutController = (() => {
-  // 功能：在不同视口尺寸下同步 CSS 变量高度
+  // Canvas, content and controls share one visible viewport, including Safari toolbar/keyboard changes.
   function setAppHeight() {
-    const height = window.visualViewport?.height || window.innerHeight;
-    document.documentElement.style.setProperty('--app-height', `${height}px`);
-    document.documentElement.style.setProperty('--app-width', `${Math.min(window.innerWidth, document.documentElement.clientWidth, window.visualViewport?.width || window.innerWidth)}px`);
-
+    const viewport = window.visualViewport;
+    const style = document.documentElement.style;
+    style.setProperty('--app-height', `${viewport?.height || window.innerHeight}px`);
+    style.setProperty('--app-width', `${viewport?.width || document.documentElement.clientWidth || window.innerWidth}px`);
+    style.setProperty('--app-left', `${viewport?.offsetLeft || 0}px`);
+    style.setProperty('--app-top', `${viewport?.offsetTop || 0}px`);
   }
 
   // 功能：禁用浏览器滚轮与触摸滚动
@@ -73,6 +75,7 @@ const layoutController = (() => {
   setAppHeight();
   disableManualScroll();
   window.visualViewport?.addEventListener('resize', setAppHeight);
+  window.visualViewport?.addEventListener('scroll', setAppHeight);
   window.addEventListener('resize', setAppHeight);
   function settleViewport() {
     setAppHeight();
@@ -91,62 +94,64 @@ const layoutController = (() => {
 
 // 功能：负责管理全屏进入/退出
 const fullscreenController = (() => {
-  // 功能：在进入全屏时更新样式
-  function handleEnterFullscreen() {
-    document.body.classList.add('fullscreen');
-    document.documentElement.style.backgroundColor = '#000';
-    fullscreenButton.style.display = 'none';
+  let active = false;
+  let pending = false;
+  let nativeActive = false;
+
+  function setMode(enabled) {
+    active = enabled;
+    document.body.classList.toggle('fullscreen', enabled);
+    const color = enabled ? '#000' : '#f0f0f0';
+    document.documentElement.style.backgroundColor = color;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+    fullscreenButton.textContent = enabled ? '退出全屏' : '全屏';
+    fullscreenButton.setAttribute('aria-pressed', String(enabled));
     layoutController.refreshHeight();
   }
 
-  // 功能：在退出全屏时恢复样式
-  function handleExitFullscreen() {
-    document.body.classList.remove('fullscreen');
-    document.documentElement.style.backgroundColor = '#f0f0f0';
-    fullscreenButton.style.display = 'block';
-    layoutController.refreshHeight();
-  }
-
-  // 功能：触发全屏或伪全屏模式
+  // iPhone Safari has no page Fullscreen API; keep an explicit, stable display-mode toggle.
   async function requestFullscreen() {
-    if (typeof document.documentElement.requestFullscreen !== 'function') {
-      handleEnterFullscreen();
-      return;
-    }
+    if (pending || active) return;
+    setMode(true);
+    if (typeof document.documentElement.requestFullscreen !== 'function') return;
+    pending = true;
     try {
       await document.documentElement.requestFullscreen();
-      handleEnterFullscreen();
-    } catch (error) {
-      handleEnterFullscreen();
-    }
+      nativeActive = Boolean(document.fullscreenElement);
+    } catch (_) { /* The display mode remains usable if Safari denies native fullscreen. */ }
+    finally { pending = false; }
   }
 
-  // 功能：退出全屏或伪全屏模式
   async function exitFullscreen() {
-    if (!document.fullscreenElement) {
-      handleExitFullscreen();
-      return;
-    }
+    if (pending || !active) return;
+    if (!document.fullscreenElement) { setMode(false); return; }
+    pending = true;
     try {
       await document.exitFullscreen();
-      handleExitFullscreen();
-    } catch (error) {
-      console.error('退出全屏失败：', error);
+    } catch (_) { /* Keep the button consistent with the browser's actual state. */ }
+    finally {
+      nativeActive = Boolean(document.fullscreenElement);
+      setMode(nativeActive);
+      pending = false;
     }
   }
 
   fullscreenButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    requestFullscreen();
+    if (active) exitFullscreen(); else requestFullscreen();
   });
 
-  document.addEventListener('click', () => {
-    exitFullscreen();
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !document.querySelector('dialog[open]')) exitFullscreen();
   });
 
   document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement) {
-      handleExitFullscreen();
+    if (document.fullscreenElement) {
+      nativeActive = true;
+      setMode(true);
+    } else if (nativeActive) {
+      nativeActive = false;
+      setMode(false);
     }
   });
 
@@ -254,7 +259,14 @@ const chartRenderer = (() => {
     const priceRange = maxPrice - minPrice || 1;
 
     // Keep both extrema in clear lanes outside the central content.
-    const content = document.querySelector('.container').getBoundingClientRect();
+    const canvasRect = backgroundCanvas.getBoundingClientRect();
+    function canvasBounds(element) {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top - canvasRect.top, bottom: rect.bottom - canvasRect.top,
+        left: rect.left - canvasRect.left, right: rect.right - canvasRect.left,
+        width: rect.width, height: rect.height };
+    }
+    const content = canvasBounds(document.querySelector('.container'));
     const lanes = GoldChartLayout.lanes(height, safeArea, content);
     const verticalOffset = lanes.high;
     const chartHeight = lanes.low - lanes.high;
@@ -333,10 +345,10 @@ const chartRenderer = (() => {
       const descriptions = [];
       for (const [name, value] of extrema) {
         const point = cachedSeries.find(([, price]) => price === value);
-        const text = `${name} ${value.toFixed(2)} ${currentCurrency === 'CNY' ? '元' : currentCurrency}`;
+        const text = `${name} ${MarketPriceModel.formatPrice(value, currentAsset)} ${currentCurrency === 'CNY' ? '元' : currentCurrency}`;
         const anchor = { x: toX(point[0]), y: toY(value) };
         const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea,
-          [fullscreenButton.getBoundingClientRect(), document.getElementById('assetSwitchButton').getBoundingClientRect()], fontSize);
+          [canvasBounds(fullscreenButton), canvasBounds(document.getElementById('assetSwitchButton'))], fontSize);
         backgroundCtx.strokeStyle = '#e35b60';
         backgroundCtx.fillStyle = '#e35b60';
         backgroundCtx.lineWidth = 1.5;
@@ -395,6 +407,7 @@ const chartRenderer = (() => {
   new ResizeObserver(() => { layoutController.refreshHeight(); requestStaticDraw(); }).observe(document.querySelector('.container'));
   new MutationObserver(() => requestStaticDraw()).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   window.visualViewport?.addEventListener('resize', () => requestStaticDraw());
+  window.visualViewport?.addEventListener('scroll', () => requestStaticDraw());
   requestStaticDraw();
 
   return {
@@ -457,7 +470,8 @@ async function fetchPayload(path) {
 
 function renderPrimary() {
   const timestamp = lastPrimary?.timestamp;
-  priceElement.textContent = lastPrimary ? `${lastPrimary.price.toFixed(2)} ${currentCurrency}/${currentAsset.unit}` : '暂无数据';
+  priceElement.textContent = lastPrimary ? `${MarketPriceModel.formatPrice(lastPrimary.price, currentAsset)} ${currentCurrency}/${currentAsset.unit}` : '暂无数据';
+  priceElement.title = lastPrimary ? `${lastPrimary.price.toFixed(2)} ${currentCurrency}/${currentAsset.unit}` : '';
   timeElement.textContent = timestamp ? '报价时间：' + new Date(timestamp).toLocaleString() : '—';
   const status = GoldPriceModel.status(timestamp, primaryFailed);
   statusElement.textContent = status.text;
@@ -645,13 +659,13 @@ const changeBoardRenderer = (() => {
 
     const { changeValue, changePercent, baselinePrice } = changeData;
     const direction = changeValue > 0 ? 'up' : changeValue < 0 ? 'down' : 'flat';
-    const absoluteValue = Math.abs(changeValue).toFixed(2);
+    const absoluteValue = MarketPriceModel.formatPrice(Math.abs(changeValue), currentAsset);
     const absolutePercent = Math.abs(changePercent).toFixed(2);
     const arrowSymbol = direction === 'up' ? '▲' : direction === 'down' ? '▼' : '▬';
     const signedValue = changeValue > 0 ? `${absoluteValue}` : changeValue < 0 ? `${absoluteValue}` : absoluteValue;
     const signedPercent = changePercent > 0 ? `${absolutePercent}%` : changePercent < 0 ? `${absolutePercent}%` : `${absolutePercent}%`;
     const valueLines = [signedValue, signedPercent];
-    const extraText = `起始价：${baselinePrice.toFixed(2)}`;
+    const extraText = `起始价：${MarketPriceModel.formatPrice(baselinePrice, currentAsset)}`;
 
     return { arrowSymbol, valueLines, extraText, direction };
   }

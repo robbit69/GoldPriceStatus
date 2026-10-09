@@ -5,6 +5,11 @@
   };
   const model = {
     assets,
+    // Display only: calculations and chart coordinates always use the original price.
+    formatPrice(value, asset) {
+      return asset.type === 'bitcoin' && Math.abs(value) >= 1000
+        ? `${(value / 1000).toFixed(1)}K` : value.toFixed(2);
+    },
     stock(input, market = 'auto') {
       let symbol = String(input || '').trim().toUpperCase();
       if (market === 'HK' && /^\d{1,5}$/.test(symbol)) symbol = symbol.padStart(4, '0') + '.HK';

@@ -1,0 +1,29 @@
+name: Mobile compatibility
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Unit and API regressions
+        run: node --test test/*.test.cjs
+      - name: Install browser test tools outside the application
+        run: |
+          npm install --prefix "$RUNNER_TEMP/goldprice-browser" --no-audit --no-fund playwright-core@1.64.0
+          node "$RUNNER_TEMP/goldprice-browser/node_modules/playwright-core/cli.js" install --with-deps chromium webkit
+      - name: XS touch, rotation, safe areas and price formatting
+        run: |
+          export GOLDPRICE_PLAYWRIGHT_PATH="$RUNNER_TEMP/goldprice-browser/node_modules/playwright-core"
+          node test/mobile.browser.cjs

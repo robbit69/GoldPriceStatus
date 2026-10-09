@@ -4,10 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#f0f0f0">
   <title>行情看板 · 黄金 / 比特币 / 股票</title>
   <style>
     :root {
       --app-height: 100vh; /* 通过 JS 动态更新，保证移动端高度准确 */
+      --app-left: 0px;
+      --app-top: 0px;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -31,12 +35,13 @@
       justify-content: center;
       align-items: center;
       height: var(--app-height);
-      transition: background-color 0.3s;
-      position: relative;
+      position: fixed;
+      left: var(--app-left);
+      top: var(--app-top);
       touch-action: manipulation; /* 禁止滚动手势但保留点击 */
     }
     #backgroundChart {
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
       width: 100vw;
@@ -183,7 +188,7 @@
     }
     /* 全屏按钮样式，居中显示，轻拟物风格 */
     #fullscreenButton {
-      position: fixed;
+      position: absolute;
       bottom: 8vh;
       left: 50%;
       transform: translateX(-50%);
@@ -198,10 +203,14 @@
                   -6px -6px 12px rgba(255, 255, 255, 0.6);
       color: #505050;
       font-weight: 600;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      width: 96px;
+      min-height: 44px;
+      box-sizing: border-box;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      transition: box-shadow 0.2s ease;
     }
     #fullscreenButton:active {
-      transform: translateX(-50%) translateY(2px);
       box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.2),
                   inset -4px -4px 8px rgba(255, 255, 255, 0.7);
     }
@@ -271,10 +280,12 @@
       .change-card .change-lines { flex-wrap: wrap; justify-content: center; column-gap: 8px; row-gap: 0; }
       .change-card .change-value { flex-wrap: wrap; }
     }
-    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #f0f0f0; }
+    html { height: 100%; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #f0f0f0; }
+    @supports (height: 100dvh) { :root { --app-height: 100dvh; } }
     .asset-label { font-size: 14px; font-weight: 600; color: #947427; }
     .asset-source { font-size: 11px; line-height: 1.2; color: #806d45; text-align: center; }
-    #assetSwitchButton { position: fixed; z-index: 1000; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px);
+    #assetSwitchButton { position: absolute; z-index: 1000; top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px);
+      min-height: 44px; box-sizing: border-box; touch-action: manipulation;
       max-width: 45%; border: 1px solid #d4af3740; border-radius: 18px; padding: 5px 12px; font: 600 14px Arial, sans-serif;
       color: #80631b; background: #ffffffc9; cursor: pointer; }
     .fullscreen .asset-label, .fullscreen .asset-source { color: #d4af37; }
@@ -360,10 +371,10 @@
     <div id="savedStocks" class="saved-stocks" aria-label="已选及常用股票"></div>
   </dialog>
   <!-- 全屏按钮，悬浮在底部居中 -->
-  <button id="fullscreenButton">全屏</button>
+  <button id="fullscreenButton" type="button" aria-pressed="false">全屏</button>
   <script src="price-model.js?v=20260914"></script>
-  <script src="market-model.js?v=20261009-market1"></script>
+  <script src="market-model.js?v=20261009-mobile2"></script>
   <script src="chart-layout.js?v=20260922-safari2"></script>
-  <script src="script.js?v=20261009-market1"></script>
+  <script src="script.js?v=20261009-mobile2"></script>
 </body>
 </html> 

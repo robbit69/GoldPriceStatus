@@ -11,6 +11,18 @@ function chart(symbol = 'BTC-USD', now = Date.now()) {
 }
 const response = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
 
+test('Bitcoin prices use one decimal K while gold and stock prices retain cents', () => {
+  for (const [price, text] of [[82300, '82.3K'], [81000, '81.0K'], [82349.99, '82.3K'],
+    [82350, '82.3K'], [0, '0.00'], [999.99, '999.99'], [1000, '1.0K'], [-2100, '-2.1K']]) {
+    assert.equal(model.formatPrice(price, model.assets.bitcoin), text);
+  }
+  assert.equal(model.formatPrice(82300, model.assets.gold), '82300.00');
+  assert.equal(model.formatPrice(82300, model.stock('AAPL')), '82300.00');
+  const points = [[1, 82349.99], [2, 82400.01]];
+  points.forEach(point => model.formatPrice(point[1], model.assets.bitcoin));
+  assert.deepEqual(points, [[1, 82349.99], [2, 82400.01]]);
+});
+
 test('stock input resolves US, Shanghai, Shenzhen and Hong Kong codes', () => {
   for (const [input, market, symbol, currency] of [
     ['aapl', 'auto', 'AAPL', 'USD'], ['brk-b', 'US', 'BRK-B', 'USD'],
