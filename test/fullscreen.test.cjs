@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function page(native = 'unavailable') {
+function page(native = 'unavailable', pointerEvents = true) {
   const classes = new Set();
   const buttonEvents = {};
   const documentEvents = {};
@@ -26,6 +26,7 @@ function page(native = 'unavailable') {
     };
   }
   const context = vm.createContext({ document, fullscreenButton: button,
+    window: { PointerEvent: pointerEvents ? function PointerEvent() {} : undefined },
     layoutController: { refreshHeight() {} }, console });
   const source = fs.readFileSync('script.js', 'utf8');
   const controller = vm.runInContext(source.slice(source.indexOf('const fullscreenController ='),
@@ -118,4 +119,68 @@ test('failed native exit keeps the toggle consistent and allows retry', async ()
   p.document.exitFullscreen = exit;
   await p.controller.exitFullscreen();
   assert.equal(p.classes.has('fullscreen'), false);
+});
+
+function pointer(p, name, extra = {}) {
+  p.buttonEvents[name]({ pointerType: 'touch', pointerId: 1, isPrimary: true,
+    clientX: 100, clientY: 30, stopPropagation() {}, ...extra });
+}
+const compatibilityClick = p => p.buttonEvents.click({ detail: 1, stopPropagation() {}, preventDefault() {} });
+
+test('touch release with finger movement activates once even when Safari omits its click', () => {
+  const p = page();
+  pointer(p, 'pointerdown');
+  pointer(p, 'pointermove', { clientX: 106, clientY: 33 });
+  pointer(p, 'pointerup', { clientX: 106, clientY: 33 });
+  assert.equal(p.classes.has('fullscreen'), true);
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), true, 'compatibility click must not undo the release');
+  pointer(p, 'pointerdown');
+  pointer(p, 'pointerup');
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), false);
+});
+
+test('cancelled pointers and deliberate drags do not activate or create ghost clicks', () => {
+  const p = page();
+  pointer(p, 'pointerdown');
+  pointer(p, 'pointercancel');
+  pointer(p, 'pointerup');
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), false);
+  pointer(p, 'pointerdown');
+  pointer(p, 'pointermove', { clientX: 130 });
+  pointer(p, 'pointermove');
+  pointer(p, 'pointerup');
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), false, 'returning after a drag is not a tap');
+  pointer(p, 'pointerdown');
+  pointer(p, 'pointerdown', { pointerId: 2, isPrimary: false });
+  pointer(p, 'pointerup');
+  assert.equal(p.classes.has('fullscreen'), false, 'multi-touch must not activate');
+});
+
+test('mouse and keyboard remain usable after touch activation', () => {
+  const p = page();
+  pointer(p, 'pointerdown'); pointer(p, 'pointerup'); compatibilityClick(p);
+  p.buttonEvents.click({ detail: 0, stopPropagation() {} });
+  assert.equal(p.classes.has('fullscreen'), false, 'keyboard click exits once');
+  pointer(p, 'pointerdown', { pointerType: 'mouse' });
+  pointer(p, 'pointerup', { pointerType: 'mouse' });
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), true, 'mouse click enters once');
+});
+
+test('older Safari touch events also tolerate movement and consume a compatibility click', () => {
+  const p = page('unavailable', false);
+  const touch = (x = 100) => ({ identifier: 1, clientX: x, clientY: 30 });
+  p.buttonEvents.touchstart({ touches: [touch()], changedTouches: [touch()] });
+  p.buttonEvents.touchmove({ touches: [touch(106)], changedTouches: [touch(106)] });
+  let prevented = false;
+  p.buttonEvents.touchend({ changedTouches: [touch(106)], stopPropagation() {}, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(p.classes.has('fullscreen'), true);
+  p.buttonEvents.mousedown();
+  compatibilityClick(p);
+  assert.equal(p.classes.has('fullscreen'), true);
 });

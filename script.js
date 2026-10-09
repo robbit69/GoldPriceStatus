@@ -65,7 +65,7 @@ const layoutController = (() => {
   // 功能：禁用浏览器滚轮与触摸滚动
   function disableManualScroll() {
     const preventScrollHandler = (event) => {
-      if (event.target.closest?.('dialog, input, select')) return;
+      if (event.target.closest?.('dialog, input, select, #fullscreenButton')) return;
       event.preventDefault();
     };
     window.addEventListener('wheel', preventScrollHandler, { passive: false });
@@ -136,9 +136,71 @@ const fullscreenController = (() => {
     }
   }
 
-  fullscreenButton.addEventListener('click', (event) => {
-    event.stopPropagation();
+  function toggleMode() {
     if (active) exitFullscreen(); else requestFullscreen();
+  }
+
+  // Safari may omit the compatibility click after a slightly moving touch.
+  // Activate on release and consume its subsequent click, without affecting mouse/keyboard clicks.
+  let gesture = null;
+  let handledTouch = false;
+  const TAP_SLOP = 12;
+  function startTouch(id, x, y) {
+    handledTouch = true;
+    gesture = { id, x, y, moved: false };
+  }
+  function moveTouch(id, x, y) {
+    if (gesture?.id === id && Math.hypot(x - gesture.x, y - gesture.y) > TAP_SLOP) gesture.moved = true;
+  }
+  function endTouch(id, x, y) {
+    if (gesture?.id !== id) return;
+    moveTouch(id, x, y);
+    const activate = !gesture.moved;
+    gesture = null;
+    if (activate) toggleMode();
+  }
+  if (typeof window.PointerEvent === 'function') {
+    fullscreenButton.addEventListener('pointerdown', event => {
+      if (event.pointerType === 'mouse') { handledTouch = false; gesture = null; return; }
+      if (event.isPrimary === false) { gesture = null; return; }
+      startTouch(event.pointerId, event.clientX, event.clientY);
+      try { fullscreenButton.setPointerCapture?.(event.pointerId); } catch (_) {}
+    });
+    fullscreenButton.addEventListener('pointermove', event => moveTouch(event.pointerId, event.clientX, event.clientY));
+    fullscreenButton.addEventListener('pointerup', event => {
+      if (event.pointerType === 'mouse') return;
+      event.stopPropagation();
+      endTouch(event.pointerId, event.clientX, event.clientY);
+    });
+    fullscreenButton.addEventListener('pointercancel', () => { gesture = null; });
+  } else {
+    let compatibilityClickUntil = 0;
+    fullscreenButton.addEventListener('touchstart', event => {
+      if (event.touches.length !== 1) { gesture = null; return; }
+      const point = event.changedTouches[0];
+      startTouch(point.identifier, point.clientX, point.clientY);
+    }, { passive: true });
+    fullscreenButton.addEventListener('touchmove', event => {
+      if (event.touches.length !== 1) { gesture = null; return; }
+      const point = event.changedTouches[0];
+      moveTouch(point.identifier, point.clientX, point.clientY);
+    }, { passive: true });
+    fullscreenButton.addEventListener('touchend', event => {
+      compatibilityClickUntil = Date.now() + 700;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = event.changedTouches[0];
+      if (point) endTouch(point.identifier, point.clientX, point.clientY);
+    }, { passive: false });
+    fullscreenButton.addEventListener('touchcancel', () => { gesture = null; });
+    fullscreenButton.addEventListener('mousedown', () => {
+      if (Date.now() > compatibilityClickUntil) handledTouch = false;
+    });
+  }
+  fullscreenButton.addEventListener('click', event => {
+    event.stopPropagation();
+    if (handledTouch && event.detail !== 0) { event.preventDefault(); return; }
+    toggleMode();
   });
 
   document.addEventListener('keydown', (event) => {
@@ -268,8 +330,8 @@ const chartRenderer = (() => {
     }
     const content = canvasBounds(document.querySelector('.container'));
     const lanes = GoldChartLayout.lanes(height, safeArea, content);
-    const verticalOffset = lanes.high;
-    const chartHeight = lanes.low - lanes.high;
+    const verticalOffset = lanes.plotHigh;
+    const chartHeight = lanes.plotLow - lanes.plotHigh;
 
     const toX = (timestamp) => {
       const ratio = (timestamp - minTime) / timeRange;
@@ -279,7 +341,7 @@ const chartRenderer = (() => {
     };
     const toY = (price) => {
       const normalized = (price - minPrice) / priceRange;
-      return minPrice === maxPrice ? verticalOffset : verticalOffset + chartHeight - normalized * chartHeight;
+      return minPrice === maxPrice ? verticalOffset + chartHeight / 2 : verticalOffset + chartHeight - normalized * chartHeight;
     };
 
     const visibleSeries = interpolateSeries(progress);
@@ -347,17 +409,20 @@ const chartRenderer = (() => {
         const point = cachedSeries.find(([, price]) => price === value);
         const text = `${name} ${MarketPriceModel.formatPrice(value, currentAsset)} ${currentCurrency === 'CNY' ? '元' : currentCurrency}`;
         const anchor = { x: toX(point[0]), y: toY(value) };
-        const label = GoldChartLayout.label(anchor, backgroundCtx.measureText(text).width, width, safeArea,
+        // Keep text outside the quote/cards even though the compressed curve runs behind them.
+        const labelAnchor = { x: anchor.x, y: value === maxPrice ? lanes.high : lanes.low };
+        const label = GoldChartLayout.label(labelAnchor, backgroundCtx.measureText(text).width, width, safeArea,
           [canvasBounds(fullscreenButton), canvasBounds(document.getElementById('assetSwitchButton'))], fontSize);
         backgroundCtx.strokeStyle = '#e35b60';
         backgroundCtx.fillStyle = '#e35b60';
         backgroundCtx.lineWidth = 1.5;
         backgroundCtx.beginPath();
         backgroundCtx.moveTo(anchor.x, anchor.y);
-        backgroundCtx.lineTo(label.end, anchor.y);
+        backgroundCtx.lineTo(anchor.x, labelAnchor.y);
+        backgroundCtx.lineTo(label.end, labelAnchor.y);
         backgroundCtx.stroke();
         backgroundCtx.textBaseline = 'bottom';
-        backgroundCtx.fillText(text, label.x, anchor.y - 6);
+        backgroundCtx.fillText(text, label.x, labelAnchor.y - 6);
         descriptions.push(text);
       }
       document.querySelector('.chart-description').textContent = `${currentAsset.name}，当前${{day: '24小时', week: '7天', month: '30天'}[selectedPeriod]}，${descriptions.join('，')}，单位${currentCurrency}/${currentAsset.unit}`;

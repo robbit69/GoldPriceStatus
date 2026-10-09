@@ -1,11 +1,15 @@
-/* Extremum anchors keep their time coordinate. The chart's price scale uses
-   the free lanes above/below the content, so leaders cannot cross the cards. */
+/* Keep extremum labels in free lanes; compress only the plotted price range. */
 (function (root) {
   const layout = {
     lanes(height, safe, content) {
+      const high = Math.max(safe.top + 30, content.top - 16);
+      const low = Math.min(height - safe.bottom - 12, content.bottom + 34);
+      const center = (high + low) / 2;
+      const halfRange = Math.max(0, low - high) * .72 / 2;
       return {
-        high: Math.max(safe.top + 30, content.top - 16),
-        low: Math.min(height - safe.bottom - 12, content.bottom + 34)
+        high, low,
+        plotHigh: center - halfRange,
+        plotLow: center + halfRange
       };
     },
     label(anchor, textWidth, width, safe, obstacles = [], fontSize = 14) {

@@ -103,7 +103,8 @@
       cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
     }
     #assetSwitchButton { top: calc(var(--safe-top) + 4px); left: calc(var(--safe-left) + 12px); max-width: 45%; }
-    #fullscreenButton { width: 96px; bottom: calc(var(--safe-bottom) + 12px); left: 50%; transform: translateX(-50%); }
+    #fullscreenButton { width: 96px; min-height: 48px; bottom: calc(var(--safe-bottom) + 12px); left: 50%; transform: translateX(-50%);
+      touch-action: none; -webkit-user-select: none; user-select: none; }
     #assetSwitchButton:active, #fullscreenButton:active { border-color: #d4af37; }
     .fullscreen {
       background: #000; --muted-color: #b5a373;
@@ -238,7 +239,7 @@
   <button id="fullscreenButton" type="button" aria-pressed="false">全屏</button>
   <script src="price-model.js?v=20260914"></script>
   <script src="market-model.js?v=20261009-mobile2"></script>
-  <script src="chart-layout.js?v=20260922-safari2"></script>
-  <script src="script.js?v=20261009-polish1"></script>
+  <script src="chart-layout.js?v=20261009-touch3"></script>
+  <script src="script.js?v=20261009-touch3"></script>
 </body>
 </html> 

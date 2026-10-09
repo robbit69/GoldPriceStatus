@@ -19,6 +19,7 @@ async function run(browserType, origin, standalone) {
   try {
     const page = await browser.newPage({ viewport: { width: 812, height: 375 },
       isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
+    const touchSession = browserType === 'chromium' ? await page.context().newCDPSession(page) : null;
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(standalone => Object.defineProperty(navigator, 'standalone', { value: standalone }), standalone);
@@ -75,13 +76,23 @@ async function run(browserType, origin, standalone) {
         return { canvas: rect('canvas'), content: rect('.container'), price: rect('.price'),
           button: rect('#fullscreenButton'), switcher: rect('#assetSwitchButton'),
           first: window.__chartPath[0].x, last: window.__chartPath.at(-1).x,
-          safe: readSafeAreaInsets(), padding: getComputedStyle(document.body).padding, scrollWidth: document.documentElement.scrollWidth, labels: window.__chartLabels, labelBounds: window.__labelBounds };
+          safe: readSafeAreaInsets(), padding: getComputedStyle(document.body).padding,
+          plotTop: Math.min(...window.__chartPath.map(point => point.y)),
+          plotBottom: Math.max(...window.__chartPath.map(point => point.y)),
+          scrollWidth: document.documentElement.scrollWidth, labels: window.__chartLabels, labelBounds: window.__labelBounds };
       });
       assert.equal(g.first, 0); assert.equal(g.last, width);
       assert.equal(g.canvas.left, left); assert.equal(g.canvas.top, top);
       assert.equal(g.canvas.width, width); assert.equal(g.canvas.height, height);
       assert.ok(g.content.top >= top && g.content.bottom <= top + height, JSON.stringify(g));
       assert.ok(g.price.left >= left + inset && g.price.right <= left + width - inset, JSON.stringify(g));
+      const lanes = await page.evaluate(() => {
+        const canvas = document.querySelector('canvas').getBoundingClientRect();
+        const content = document.querySelector('.container').getBoundingClientRect();
+        return GoldChartLayout.lanes(canvas.height, readSafeAreaInsets(),
+          { top: content.top - canvas.top, bottom: content.bottom - canvas.top });
+      });
+      assert.ok(Math.abs((g.plotBottom - g.plotTop) / (lanes.low - lanes.high) - .72) < .00001, 'plot must retain the smaller amplitude');
       for (const button of [g.button, g.switcher]) {
         assert.ok(button.height >= 44 && button.width >= 44);
         assert.ok(button.left >= left + inset && button.right <= left + width - inset);
@@ -92,6 +103,22 @@ async function run(browserType, origin, standalone) {
         }
       }
       return g;
+    }
+    async function movingTap(x, y, dx) {
+      if (touchSession) {
+        // Trusted moving touches exercise browser gesture recognition, beyond an instantaneous tap.
+        await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+        await touchSession.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y: y + 3 }] });
+        await touchSession.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        // WebKit exposes tap only: test its release/compatibility-click sequence explicitly as well.
+        const button = page.locator('#fullscreenButton');
+        const event = { pointerType: 'touch', pointerId: 9, isPrimary: true, clientX: x, clientY: y };
+        await button.dispatchEvent('pointerdown', event);
+        await button.dispatchEvent('pointermove', { ...event, clientX: x + dx, clientY: y + 3 });
+        await button.dispatchEvent('pointerup', { ...event, clientX: x + dx, clientY: y + 3 });
+        await button.dispatchEvent('click', { detail: 1 });
+      }
     }
     for (const type of ['bitcoin', 'stock', 'gold']) {
       await choose(type);
@@ -125,6 +152,23 @@ async function run(browserType, origin, standalone) {
           await page.touchscreen.tap(x, y);
           assert.equal(await page.evaluate(() => document.body.classList.contains('fullscreen')), tap % 2 === 1);
         }
+        for (let tap = 0; tap < 4; tap++) {
+          await movingTap(x, y, tap % 2 ? 8 : 5);
+          assert.equal(await page.evaluate(() => document.body.classList.contains('fullscreen')), tap % 2 === 0,
+            'each moving touch must toggle once without waiting for another tap');
+        }
+        await movingTap(x, y, 25);
+        assert.equal(await page.evaluate(() => document.body.classList.contains('fullscreen')), false, 'drag is not a tap');
+        const unblocked = await page.evaluate(() => {
+          const touchMove = new Event('touchmove', { bubbles: true, cancelable: true });
+          document.getElementById('fullscreenButton').dispatchEvent(touchMove);
+          return !touchMove.defaultPrevented;
+        });
+        assert.equal(unblocked, true, 'global scroll prevention must leave the button touch alone');
+        await page.locator('#fullscreenButton').press('Enter');
+        assert.equal(await page.evaluate(() => document.body.classList.contains('fullscreen')), true, 'keyboard works after touch');
+        await page.locator('#fullscreenButton').press('Space');
+        assert.equal(await page.evaluate(() => document.body.classList.contains('fullscreen')), false);
         assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(240, 240, 240)');
       }
     }
@@ -148,7 +192,7 @@ async function run(browserType, origin, standalone) {
     });
     await geometry(812, 375, 44);
     assert.deepEqual(errors, []);
-    console.log(`${browserType} ${standalone ? 'home screen' : 'Safari'}: K format, three assets, XS rotation, press geometry, single taps and viewport origin passed`);
+    console.log(`${browserType} ${standalone ? 'home screen' : 'Safari'}: compressed plot, moving touches, click deduplication, keyboard, assets and XS layout passed`);
   } finally { await browser.close(); }
 }
 

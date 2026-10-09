@@ -31,3 +31,13 @@ test('top corner control moves the label away while keeping its extremum anchor'
   assert.ok(label.x + 108 < control.left);
   assert.equal(label.end, label.x);
 });
+
+test('plot amplitude is reduced by 28% around its center while extremum labels retain their free lanes', () => {
+  for (const [height, top, bottom] of [[375, 55, 320], [300, 44, 256], [812, 244, 568]]) {
+    const lanes = layout.lanes(height, { top: 0, bottom: 21 }, { top, bottom });
+    assert.ok(Math.abs((lanes.plotLow - lanes.plotHigh) / (lanes.low - lanes.high) - .72) < 1e-12);
+    assert.equal((lanes.plotHigh + lanes.plotLow) / 2, (lanes.high + lanes.low) / 2);
+    assert.ok(lanes.high < top && lanes.low > bottom);
+    assert.ok(lanes.plotHigh > lanes.high && lanes.plotLow < lanes.low);
+  }
+});
