@@ -108,7 +108,7 @@ const fullscreenController = (() => {
 
   // 功能：触发全屏或伪全屏模式
   async function requestFullscreen() {
-    if (isIOS) {
+    if (typeof document.documentElement.requestFullscreen !== 'function') {
       handleEnterFullscreen();
       return;
     }
@@ -122,10 +122,6 @@ const fullscreenController = (() => {
 
   // 功能：退出全屏或伪全屏模式
   async function exitFullscreen() {
-    if (isIOS) {
-      handleExitFullscreen();
-      return;
-    }
     if (!document.fullscreenElement) {
       handleExitFullscreen();
       return;
@@ -265,7 +261,7 @@ const chartRenderer = (() => {
     const toX = (timestamp) => {
       const ratio = (timestamp - minTime) / timeRange;
       // The background spans the screen; only labels and controls avoid the notch.
-      const x = 12 + ratio * (width - 24);
+      const x = ratio * width;
       return Math.min(width, Math.max(0, x));
     };
     const toY = (price) => {
