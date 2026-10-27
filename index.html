@@ -5,7 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="行情看板">
   <meta name="theme-color" content="#f0f0f0">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title>行情看板 · 黄金 / 比特币 / 股票</title>
   <style>
     :root {
@@ -22,6 +27,7 @@
       --muted-color: #806d45;
       --control-background: #ffffffd9;
       --control-border: #b88e2038;
+      --price-color: #a98317;
     }
     @supports (height: 100dvh) { :root { --app-height: 100dvh; } }
     html, body { overflow: hidden; overscroll-behavior: none; }
@@ -61,7 +67,21 @@
       margin: 0; font-size: clamp(38px, min(8vw, 14vh), 112px);
       font-weight: 650; letter-spacing: -.035em; line-height: 1.06;
       white-space: nowrap; font-variant-numeric: tabular-nums;
+      color: var(--price-color); border-radius: .12em;
     }
+    /* 报价变动：短暂染色，远处余光即可察觉涨跌 */
+    .price.tick-up { animation: tick-up 1.6s ease-out; }
+    .price.tick-down { animation: tick-down 1.6s ease-out; }
+    @keyframes tick-up { 0%, 25% { color: var(--change-up-color); } }
+    @keyframes tick-down { 0%, 25% { color: var(--change-down-color); } }
+    @media (prefers-reduced-motion: reduce) { .price.tick-up, .price.tick-down { animation: none; } }
+    .wake-note { display: none; font-size: 11px; color: var(--muted-color); }
+    .fullscreen .wake-note:not(:empty) { display: block; }
+    /* 全屏闲置：按钮淡化但仍可点，触摸任意处恢复 */
+    #assetSwitchButton, #fullscreenButton { transition: opacity .6s ease; }
+    .fullscreen.idle #assetSwitchButton, .fullscreen.idle #fullscreenButton { opacity: .14; }
+    .fullscreen.idle { cursor: none; }
+    .container { transition: translate 2s ease; }
     .price-unit { font-size: .25em; font-weight: 500; letter-spacing: 0; opacity: .78; }
     .quote-meta { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
     .time { margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted-color); white-space: nowrap; }
@@ -107,7 +127,7 @@
       touch-action: none; -webkit-user-select: none; user-select: none; }
     #assetSwitchButton:active, #fullscreenButton:active { border-color: #d4af37; }
     .fullscreen {
-      background: #000; --muted-color: #b5a373;
+      background: #000; --muted-color: #b5a373; --price-color: #d4af37;
       --change-up-color: #ff7373; --change-down-color: #4bd7a0;
       --control-background: #17160ee6; --control-border: #d4af3738;
     }
@@ -115,10 +135,12 @@
     .fullscreen .change-card { background: #12120ee6; border-color: #d4af3726; }
     .fullscreen .change-card.active { background: #1a180fe6; border-color: #d4af376b; box-shadow: inset 0 -2px 0 #d4af3760; }
     .fullscreen .status.active { color: #4bd7a0; }
+    .fullscreen .asset-source { opacity: .55; }
     .chart-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     @media (max-width: 600px) and (orientation: portrait) {
       .container { width: calc(100% - 24px); gap: 18px; }
-      .price { font-size: 14vw; }
+      .price { font-size: min(19vw, 9.5vh); line-height: 1; }
+      .price-unit { display: block; margin-top: .35em; font-size: .2em; letter-spacing: .02em; }
       .quote-meta { flex-direction: column; gap: 5px; }
       .time { font-size: 12px; }
       .status { font-size: 13px; }
@@ -194,6 +216,7 @@
       <div class="status" aria-live="polite">状态加载中...</div>
     </div>
     <div class="history-status" aria-live="polite"></div>
+    <div class="wake-note" role="status"></div>
     <div class="change-board" aria-live="polite">
       <div class="change-card active" data-card-period="day" role="button" tabindex="0" aria-pressed="true">
         <span class="indicator" aria-hidden="true"></span>
@@ -240,6 +263,6 @@
   <script src="price-model.js?v=20260914"></script>
   <script src="market-model.js?v=20261009-mobile2"></script>
   <script src="chart-layout.js?v=20261009-touch3"></script>
-  <script src="script.js?v=20261009-touch3"></script>
+  <script src="script.js?v=20261027-ambient1"></script>
 </body>
 </html> 
