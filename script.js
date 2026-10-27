@@ -533,6 +533,32 @@ async function fetchPayload(path) {
   } finally { clearTimeout(timeout); activeRequests.delete(controller); }
 }
 
+// 报价时间：当天只显示时分，其余显示月日；附带“几分钟前”，远处一眼可判断数据新旧。
+function formatQuoteTime(timestamp, now = Date.now()) {
+  const date = new Date(timestamp);
+  const pad = value => String(value).padStart(2, '0');
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const sameDay = new Date(now).toDateString() === date.toDateString();
+  const absolute = sameDay ? clock : `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+  const minutes = Math.max(0, Math.floor((now - timestamp) / 60000));
+  const relative = minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` :
+    minutes < 1440 ? `${Math.floor(minutes / 60)} 小时前` : `${Math.floor(minutes / 1440)} 天前`;
+  return `报价 ${absolute} · ${relative}`;
+}
+
+// 同一资产的报价变动时短暂闪烁红/绿（涨红跌绿），切换资产不闪。
+let renderedQuote = null;
+function flashPriceChange() {
+  const key = `${currentAsset.type}:${currentAsset.symbol}`;
+  const price = lastPrimary?.price;
+  const previous = renderedQuote;
+  renderedQuote = price == null ? null : { key, price };
+  if (!previous || price == null || previous.key !== key || previous.price === price) return;
+  priceElement.classList.remove('tick-up', 'tick-down');
+  void priceElement.offsetWidth; // 重新触发同名动画
+  priceElement.classList.add(price > previous.price ? 'tick-up' : 'tick-down');
+}
+
 function renderPrimary() {
   const timestamp = lastPrimary?.timestamp;
   priceElement.textContent = lastPrimary ? `${MarketPriceModel.formatPrice(lastPrimary.price, currentAsset)} ` : '暂无数据';
@@ -543,7 +569,9 @@ function renderPrimary() {
     priceElement.append(unit);
   }
   priceElement.title = lastPrimary ? `${lastPrimary.price.toFixed(2)} ${currentCurrency}/${currentAsset.unit}` : '';
-  timeElement.textContent = timestamp ? '报价时间：' + new Date(timestamp).toLocaleString() : '—';
+  flashPriceChange();
+  timeElement.textContent = timestamp ? formatQuoteTime(timestamp) : '—';
+  timeElement.title = timestamp ? new Date(timestamp).toLocaleString('zh-CN', { hour12: false }) : '';
   const status = GoldPriceModel.status(timestamp, primaryFailed);
   statusElement.textContent = status.text;
   statusElement.classList.remove('stopped', 'active');
@@ -562,6 +590,8 @@ async function refreshPrimary(epoch = refreshEpoch) {
     primaryFailed = payload.updateFailed === true;
   } catch (_) { if (epoch !== refreshEpoch) return; primaryFailed = true; }
   renderPrimary();
+  // 主报价每分钟更新而曲线每五分钟更新：卡片终点跟随主报价，避免与大字价格不一致。
+  changeBoardRenderer.render(cachedSeriesByPeriod, lastPrimary);
 }
 
 async function refreshHistory(animate, epoch = refreshEpoch) {
@@ -594,7 +624,7 @@ async function refreshHistory(animate, epoch = refreshEpoch) {
     }
   }
   renderPrimary();
-  changeBoardRenderer.render(cachedSeriesByPeriod);
+  changeBoardRenderer.render(cachedSeriesByPeriod, lastPrimary);
   chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
 }
 
@@ -630,7 +660,7 @@ async function refreshMarket(animate, epoch) {
     historyStatusElement.textContent = result.failed ? '曲线更新失败，已有曲线保留' : '';
     renderAssetMeta();
     renderPrimary();
-    changeBoardRenderer.render(cachedSeriesByPeriod);
+    changeBoardRenderer.render(cachedSeriesByPeriod, lastPrimary);
     chartRenderer.render(cachedSeriesByPeriod, selectedPeriod, animate);
   } catch (error) {
     if (epoch !== refreshEpoch) return;
@@ -678,9 +708,14 @@ function selectAsset(asset) {
 // 功能：负责计算与渲染涨跌幅看板
 const changeBoardRenderer = (() => {
   // 功能：计算指定周期的涨跌幅
-  function calculateChange(dataPoints, duration, now) {
+  function calculateChange(dataPoints, duration, now, latestQuote) {
     if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
       return null;
+    }
+    // 同一来源的更新报价晚于曲线末点时，用它作为终点；没有曲线的周期仍显示暂无数据。
+    const tail = dataPoints[dataPoints.length - 1];
+    if (latestQuote && Number.isFinite(latestQuote.price) && latestQuote.timestamp > tail[0]) {
+      dataPoints = [...dataPoints, [latestQuote.timestamp, latestQuote.price]];
     }
 
     const startTime = now - duration;
@@ -742,13 +777,13 @@ const changeBoardRenderer = (() => {
   }
 
   // 功能：渲染涨跌信息
-  function render(seriesByPeriod = {}) {
+  function render(seriesByPeriod = {}, latestQuote = null) {
     const now = Date.now();
     const changeCache = {};
 
     Object.entries(PERIOD_RANGES).forEach(([period, duration]) => {
       const dataPoints = Array.isArray(seriesByPeriod[period]) ? seriesByPeriod[period] : [];
-      changeCache[period] = calculateChange(dataPoints, duration, now);
+      changeCache[period] = calculateChange(dataPoints, duration, now, latestQuote);
     });
 
     changeValueElements.forEach((element) => {
@@ -870,11 +905,88 @@ updateCardSelectionUI();
   } catch (_) {}
 })();
 
+// 功能：全屏当小监控屏时保持亮屏、闲置淡化按钮、缓慢微移防烧屏。
+const ambientDisplay = (() => {
+  const body = document.body;
+  const container = document.querySelector('.container');
+  const wakeNote = document.querySelector('.wake-note');
+  const IDLE_DELAY = 5000;
+  const DRIFT_INTERVAL = 3 * 60_000;
+  let wakeLock = null;
+  let idleTimer = null;
+  let driftTimer = null;
+  let enabled = false;
+
+  async function acquireWakeLock() {
+    if (!enabled || document.hidden || wakeLock) return;
+    if (!navigator.wakeLock?.request) { setWakeNote('此浏览器不支持保持常亮，请在系统设置中延长自动锁定'); return; }
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      if (!enabled) { lock.release().catch(() => {}); return; }
+      wakeLock = lock;
+      setWakeNote('');
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+    } catch (_) {
+      // 低电量模式或系统拒绝时如实提示，不假装已常亮。
+      setWakeNote('无法保持常亮（可能处于低电量模式）');
+    }
+  }
+  function releaseWakeLock() {
+    const lock = wakeLock;
+    wakeLock = null;
+    lock?.release().catch(() => {});
+  }
+  function setWakeNote(text) { if (wakeNote) wakeNote.textContent = text; }
+
+  function wake() {
+    body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    if (enabled) idleTimer = setTimeout(() => {
+      if (!document.querySelector('dialog[open]')) body.classList.add('idle');
+    }, IDLE_DELAY);
+  }
+
+  function drift() {
+    const offset = () => Math.round(Math.random() * 8 - 4);
+    container.style.translate = enabled ? `${offset()}px ${offset()}px` : '';
+  }
+
+  function sync() {
+    const next = body.classList.contains('fullscreen');
+    if (next === enabled) return;
+    enabled = next;
+    if (enabled) {
+      acquireWakeLock();
+      wake();
+      driftTimer = setInterval(drift, DRIFT_INTERVAL);
+    } else {
+      releaseWakeLock();
+      setWakeNote('');
+      clearTimeout(idleTimer);
+      clearInterval(driftTimer);
+      body.classList.remove('idle');
+      drift();
+    }
+  }
+
+  new MutationObserver(sync).observe(body, { attributes: true, attributeFilter: ['class'] });
+  // 捕获阶段：任何触摸/按键先唤醒按钮，再交给原有处理逻辑，不改变按钮的点击行为。
+  for (const name of ['pointerdown', 'keydown', 'mousemove']) {
+    document.addEventListener(name, wake, { capture: true, passive: true });
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) acquireWakeLock(); });
+  return { sync };
+})();
+
 // 后台页面暂停轮询，返回页面时刷新；防止慢请求重叠。
 refreshPrices(true);
 setInterval(() => {
   if (!document.hidden) refreshPrices();
 }, 60000);
+// “几分钟前”和休市判断随时间推进，无需等待下一次网络请求。
+setInterval(() => {
+  if (!document.hidden && lastPrimary) renderPrimary();
+}, 20000);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshPrices();
 });
